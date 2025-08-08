@@ -18,10 +18,9 @@ class AdminSeeder extends Seeder
             ]
         );
 
-        // Génère un token si non déjà généré
+
         $token = $admin->createToken('AdminSeederToken')->plainTextToken;
 
-        // Affiche dans le terminal
         echo "\nAdmin Token: " . $token . "\n";
     }
 }

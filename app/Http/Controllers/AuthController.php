@@ -11,10 +11,8 @@ use Illuminate\Validation\ValidationException;
 
 class AuthController extends Controller
 {
-    // Inscription
     public function register(Request $request)
     {
-        // 1. Validation
         $validator = Validator::make($request->all(), [
             'name'                  => 'required|string|max:255',
             'email'                 => 'required|string|email|max:255|unique:users,email',
@@ -22,7 +20,6 @@ class AuthController extends Controller
         ]);
 
         if ($validator->fails()) {
-            // Check if it's specifically an email uniqueness error
             if ($validator->errors()->has('email')) {
                 return response()->json([
                     'status'  => false,
@@ -38,7 +35,6 @@ class AuthController extends Controller
             ], 422);
         }
 
-        // 2. Création de l’utilisateur
         $user = User::create([
             'name'     => $request->name,
             'email'    => $request->email,
@@ -46,7 +42,6 @@ class AuthController extends Controller
             'role' => 'client',
         ]);
 
-        // 3. Création du token
         $token = $user->createToken('auth_token')->plainTextToken;
 
         return response()->json([
@@ -58,34 +53,29 @@ class AuthController extends Controller
         ], 201);
     }
 
-    // Connexion
-    public function login(Request $request)
-    {
-        $credentials = $request->validate([
-            'email'    => 'required|email',
-            'password' => 'required|string',
-        ]);
+public function login(Request $request)
+{
+    $request->validate([
+        'email'    => 'required|email',
+        'password' => 'required',
+    ]);
 
-        if (! Auth::attempt($credentials)) {
-            return response()->json([
-                'status'  => false,
-                'message' => 'Invalid credentials'
-            ], 401);
-        }
+    $user = User::where('email', $request->email)->first();
 
-        $user  = Auth::user();
-        $token = $user->createToken('auth_token')->plainTextToken;
-
-        return response()->json([
-            'status'      => true,
-            'message'     => 'Login successful',
-            'access_token'=> $token,
-            'token_type'  => 'Bearer',
-            'user'        => $user,
-        ]);
+    if (! $user || ! Hash::check($request->password, $user->password)) {
+        return response()->json(['message' => 'Identifiants invalides'], 401);
     }
 
-    // Profil
+    // Création du token API
+    $token = $user->createToken('api-token')->plainTextToken;
+
+    return response()->json([
+        'message' => 'Connexion réussie',
+        'access_token' => $token,
+        'user' => $user,
+    ], 200);
+}
+
     public function profile()
     {
         return response()->json([
@@ -94,7 +84,6 @@ class AuthController extends Controller
         ]);
     }
 
-    // Déconnexion
     public function logout(Request $request)
     {
         $request->user()->tokens()->where('id', $request->user()->currentAccessToken()->id)->delete();
