@@ -8,7 +8,7 @@ use Illuminate\Notifications\Notification;
 use Illuminate\Notifications\Messages\MailMessage;
 use App\Models\Ticket;
 
-class TicketStatusChanged extends Notification implements ShouldQueue
+class TicketStatusChanged extends Notification 
 {
     use Queueable;
 

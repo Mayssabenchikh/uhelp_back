@@ -8,7 +8,7 @@ use Illuminate\Notifications\Notification;
 use Illuminate\Notifications\Messages\MailMessage;
 use App\Models\Ticket;
 
-class TicketAssigned extends Notification implements ShouldQueue
+class TicketAssigned extends Notification 
 {
     use Queueable;
 

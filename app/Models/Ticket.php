@@ -23,21 +23,18 @@ class Ticket extends Model
         'closed_at' => 'datetime',
     ];
 
-    // Relation client avec vérification de rôle
     public function client(): BelongsTo
     {
         return $this->belongsTo(User::class, 'client_id')
             ->where('role', 'client');
     }
 
-    // Relation agent avec vérification de rôle
     public function agent(): BelongsTo
     {
         return $this->belongsTo(User::class, 'agentassigne_id')
             ->where('role', 'agent');
     }
 
-    // Mutateur pour l'assignation d'agent avec validation de rôle
     public function setAgentassigneIdAttribute($value)
     {
         if ($value && !User::where('id', $value)->where('role', 'agent')->exists()) {
@@ -47,7 +44,6 @@ class Ticket extends Model
         $this->attributes['agentassigne_id'] = $value;
     }
 
-    // Mutateur pour l'assignation de client avec validation de rôle
     public function setClientIdAttribute($value)
     {
         if (!User::where('id', $value)->where('role', 'client')->exists()) {
@@ -56,4 +52,12 @@ class Ticket extends Model
         
         $this->attributes['client_id'] = $value;
     }
+    public function responses()
+{
+    return $this->hasMany(\App\Models\TicketResponse::class);
+}
+public function internalNotes()
+{
+    return $this->hasMany(InternalNote::class);
+}
 }

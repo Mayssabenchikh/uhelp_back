@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\StoreTicketRequest;
 use App\Http\Requests\UpdateTicketRequest;
 use App\Models\Ticket;
+use App\Models\Department;
 use App\Models\User;
 use App\Notifications\TicketAssigned;
 use App\Notifications\TicketStatusChanged;
@@ -88,4 +89,18 @@ class TicketController extends Controller
         $ticket->delete();
         return response()->json(['message' => 'Ticket supprimé'], 200);
     }
+    public function ticketsByDepartment($departmentId)
+{
+    $department = Department::findOrFail($departmentId);
+
+    // Récupère tous les tickets assignés aux agents de ce département
+    $tickets = Ticket::whereIn('agentassigne_id', $department->agents->pluck('id'))
+                     ->with(['client:id,name,email', 'agent:id,name,email'])
+                     ->get();
+
+    return response()->json([
+        'department' => $department->name,
+        'tickets' => $tickets
+    ]);
+}
 }
