@@ -8,7 +8,11 @@ use App\Http\Controllers\TicketController;
 use Illuminate\Support\Facades\Mail;
 use App\Http\Controllers\DepartmentController;
 use App\Http\Controllers\TicketResponseController;
-use App\Http\Middleware\AdminMiddleware;
+use App\Http\Controllers\SubscriptionPlanController;
+use App\Http\Controllers\SubscriptionController;
+use App\Http\Controllers\StripeWebhookController;
+use App\Http\Controllers\PaymentController;
+
 use Illuminate\Http\Request;
 Route::post('register', [AuthController::class, 'register']);
 Route::post('login', [AuthController::class, 'login']);
@@ -61,3 +65,17 @@ Route::post('tickets/{ticket}/internal-notes', [InternalNoteController::class, '
 Route::get('internal-notes/{internalNote}', [InternalNoteController::class, 'show']);
 Route::put('internal-notes/{internalNote}', [InternalNoteController::class, 'update']);
 Route::delete('internal-notes/{internalNote}', [InternalNoteController::class, 'destroy']);
+
+Route::get('subscription-plans', [SubscriptionPlanController::class, 'index']);
+Route::get('subscription-plans/{subscriptionPlan}', [SubscriptionPlanController::class, 'show']);
+
+Route::middleware('auth:sanctum')->group(function () {
+    Route::get('subscriptions', [SubscriptionController::class, 'show']);
+    Route::post('subscriptions', [SubscriptionController::class, 'store']);
+    Route::post('subscriptions/cancel', [SubscriptionController::class, 'cancel']);
+
+    Route::get('payments', [PaymentController::class, 'index']);
+    // protéger la création ticket via policy; tu peux aussi ajouter middleware active.subscription si tu préfères
+});
+
+Route::post('stripe/webhook', [StripeWebhookController::class, 'handle']); // public endpoint (Webhook)

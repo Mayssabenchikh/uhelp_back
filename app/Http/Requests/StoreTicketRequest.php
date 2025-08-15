@@ -4,13 +4,16 @@ namespace App\Http\Requests;
 
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
+use Illuminate\Support\Facades\Auth; // <-- Important !
 
-class StoreTicketRequest extends FormRequest
-{
-    public function authorize()
+class StoreTicketRequest extends FormRequest{
+   public function authorize()
     {
-        return true;
+        // Utilise la façade Auth correctement
+        return Auth::check() && Auth::user()->can('create', \App\Models\Ticket::class);
     }
+
+
 
     public function rules()
     {
