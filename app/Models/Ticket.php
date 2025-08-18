@@ -16,7 +16,8 @@ class Ticket extends Model
         'client_id',
         'agentassigne_id',
         'priorite',
-        'closed_at'
+        'closed_at',
+        'subscription_id',
     ];
 
     protected $casts = [
@@ -60,4 +61,9 @@ public function internalNotes()
 {
     return $this->hasMany(InternalNote::class);
 }
+    public function subscription(): BelongsTo
+    {
+        return $this->belongsTo(Subscription::class);
+    }
+
 }

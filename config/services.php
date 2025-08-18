@@ -33,6 +33,15 @@ return [
             'bot_user_oauth_token' => env('SLACK_BOT_USER_OAUTH_TOKEN'),
             'channel' => env('SLACK_BOT_USER_DEFAULT_CHANNEL'),
         ],
-    ],
+    ], 
+    'konnect' => [
+    'base' => env('KONNECT_API_BASE', 'https://api.konnect.network'),
+    'key'  => env('KONNECT_API_KEY'),
+    'merchant_id' => env('KONNECT_MERCHANT_ID'),
+    'webhook_secret' => env('KONNECT_WEBHOOK_SECRET'),
+    'callback_url' => env('KONNECT_CALLBACK_URL'),
+    'currency' => env('KONNECT_CURRENCY', 'TND'),
+],
+
 
 ];

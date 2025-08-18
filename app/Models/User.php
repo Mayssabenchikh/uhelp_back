@@ -35,5 +35,15 @@ public function internalNotes()
 {
     return $this->hasMany(InternalNote::class, 'user_id');
 }
+public function subscriptions()
+{
+    return $this->hasMany(\App\Models\Subscription::class);
+}
+
+public function payments()
+{
+    return $this->hasMany(\App\Models\Payment::class);
+}
+
 
 }
