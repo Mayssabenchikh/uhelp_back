@@ -16,14 +16,12 @@ class SubscriptionPlan extends Model
         'billing_cycle',
         'ticket_limit',
         'features',
-
     ];
 
     protected $casts = [
         'price' => 'decimal:2',
         'ticket_limit' => 'integer',
         'features' => 'array',
-
     ];
 
     public function subscriptions()

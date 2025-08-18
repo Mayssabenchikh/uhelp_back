@@ -4,12 +4,13 @@ namespace App\Http\Requests;
 
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
+use Illuminate\Support\Facades\Auth;
 
 class StoreTicketRequest extends FormRequest
 {
     public function authorize()
     {
-        return true;
+        return Auth::check();
     }
 
     public function rules()
@@ -17,9 +18,9 @@ class StoreTicketRequest extends FormRequest
         return [
             'titre' => 'required|string|max:255',
             'description' => 'required|string',
-        'statut' => ['sometimes','required','string', Rule::in(['open','in_progress','closed'])],
+            'statut' => ['sometimes','required','string', Rule::in(['open','in_progress','closed'])],
             'client_id' => [
-                'required','integer',
+                'nullable','integer',
                 Rule::exists('users','id')->where(fn($query) => $query->where('role','client'))
             ],
             'agentassigne_id' => [

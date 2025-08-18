@@ -9,8 +9,7 @@ class StoreSubscriptionRequest extends FormRequest
 {
     public function authorize(): bool
     {
-        // L'utilisateur doit être connecté pour créer une subscription.
-    return Auth::check(); // ou Auth::user()->can('something'), Gate::allows(...)
+        return Auth::check();
     }
 
     public function rules(): array
@@ -18,7 +17,7 @@ class StoreSubscriptionRequest extends FormRequest
         return [
             'user_id' => 'nullable|exists:users,id',
             'subscription_plan_id' => 'required|exists:subscription_plans,id',
-            'status' => 'nullable|in:pending,active,cancelled,past_due',
+            'status' => 'nullable|in:pending,active,cancelled,past_due,exhausted',
             'current_period_started_at' => 'nullable|date',
             'current_period_ends_at' => 'nullable|date|after_or_equal:current_period_started_at',
             'tickets_used' => 'nullable|integer|min:0',

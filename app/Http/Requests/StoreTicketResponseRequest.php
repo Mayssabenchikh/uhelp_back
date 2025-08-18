@@ -4,13 +4,13 @@ namespace App\Http\Requests;
 
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
+use Illuminate\Support\Facades\Auth;
 
 class StoreTicketResponseRequest extends FormRequest
 {
     public function authorize(): bool
     {
-        // Autorisation simple : on laisse le contrôleur vérifier le ticket et l'utilisateur
-        return true;
+        return Auth::check();
     }
 
     public function rules(): array

@@ -9,17 +9,17 @@ class StorePaymentRequest extends FormRequest
 {
     public function authorize(): bool
     {
-        // Requiert utilisateur connecté.
-    return Auth::check(); // ou Auth::user()->can('something'), Gate::allows(...)
+        return Auth::check();
     }
 
     public function rules(): array
     {
         return [
             'subscription_id' => 'nullable|exists:subscriptions,id',
-            'amount' => 'required|numeric|min:0.01',
-            'currency' => 'required|string|size:3',
-            'status' => 'required|in:pending,completed,failed',
+            'subscription_plan_id' => 'nullable|exists:subscription_plans,id',
+            'amount' => ['sometimes','nullable','integer','between:1,100000000'],
+            'currency' => 'required|string|in:TND,EUR,USD',
+            'description' => 'nullable|string|max:500',
             'provider_payment_id' => 'nullable|string|max:255',
         ];
     }

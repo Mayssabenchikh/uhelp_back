@@ -35,13 +35,11 @@ return [
         ],
     ], 
     'konnect' => [
-    'base' => env('KONNECT_API_BASE', 'https://api.konnect.network'),
-    'key'  => env('KONNECT_API_KEY'),
-    'merchant_id' => env('KONNECT_MERCHANT_ID'),
-    'webhook_secret' => env('KONNECT_WEBHOOK_SECRET'),
-    'callback_url' => env('KONNECT_CALLBACK_URL'),
-    'currency' => env('KONNECT_CURRENCY', 'TND'),
-],
+        'api_base' => env('KONNECT_API_BASE', 'https://api.sandbox.konnect.network'),
+        'api_key' => env('KONNECT_API_KEY'),
+        'wallet_id' => env('KONNECT_WALLET_ID'),
+        'callback_url' => env('KONNECT_CALLBACK_URL'),
+    ],
 
 
 ];

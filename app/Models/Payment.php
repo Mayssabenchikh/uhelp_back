@@ -16,10 +16,11 @@ class Payment extends Model
         'currency',
         'status',
         'provider_payment_id',
+        'description',
     ];
 
     protected $casts = [
-        'amount' => 'decimal:2',
+        'amount' => 'integer',
     ];
 
     public function user()
@@ -30,5 +31,31 @@ class Payment extends Model
     public function subscription()
     {
         return $this->belongsTo(Subscription::class);
+    }
+
+    public function markPending(): self
+    {
+        $this->status = 'pending';
+        $this->save();
+        return $this->fresh();
+    }
+
+    public function markCompleted(): self
+    {
+        if ($this->status === 'completed') {
+            return $this->fresh(); // idempotence
+        }
+
+        $this->status = 'completed';
+        $this->save();
+        event(new \App\Events\PaymentCompleted($this));
+        return $this->fresh();
+    }
+
+    public function markFailed(): self
+    {
+        $this->status = 'failed';
+        $this->save();
+        return $this->fresh();
     }
 }

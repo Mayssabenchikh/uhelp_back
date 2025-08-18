@@ -1,77 +1,118 @@
 <?php
+
 namespace App\Http\Controllers;
 
-use App\Models\Payment;
-use App\Models\Subscription;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
+use App\Models\Payment;
 
 class KonnectWebhookController extends Controller
 {
     public function __invoke(Request $request)
     {
-        $apiBase = env('KONNECT_API_BASE', 'https://api.sandbox.konnect.network/api/v2');
-        $apiKey  = env('KONNECT_API_KEY');
+        // Récupérer payment_ref depuis query ou body
+        $paymentRef = $request->query('payment_ref')
+                    ?? $request->query('paymentRef')
+                    ?? $request->input('payment_ref')
+                    ?? $request->input('paymentRef');
 
-        // 1) PRIORITÉ : payment_ref en GET (callback simple)
-        $paymentRef = $request->query('payment_ref');
-
-        // 2) Si POST JSON et contient un id/ref, l'utiliser
-        if (!$paymentRef && $request->isMethod('post')) {
-            $json = json_decode($request->getContent(), true);
-            if (json_last_error() === JSON_ERROR_NONE) {
-                $paymentRef = $json['data']['id'] ?? $json['data']['payment_ref'] ?? $json['payment_ref'] ?? null;
-            }
+        if (!$paymentRef) {
+            Log::warning('Konnect webhook: missing payment_ref', ['payload' => $request->all()]);
+            return response()->json(['message' => 'payment_ref missing'], 400);
         }
 
-        if (empty($paymentRef)) {
-            Log::warning('Konnect webhook: no payment_ref', ['query' => $request->query(), 'body_len' => strlen($request->getContent())]);
-            return response()->json(['message' => 'Missing payment_ref'], 400);
-        }
-
-        // 3) Vérifier côté Konnect pour confirmer le statut (server->server)
         try {
+            // Interroger Konnect pour obtenir le statut
+            $konnectBase = rtrim(config('services.konnect.api_base'), '/');
+            $apiKey = config('services.konnect.api_key');
+
             $resp = Http::withHeaders([
                 'x-api-key' => $apiKey,
-                'Accept'    => 'application/json',
-            ])->get("{$apiBase}/payments/{$paymentRef}");
+                'Accept' => 'application/json',
+            ])->get("{$konnectBase}/api/v2/payments/{$paymentRef}");
 
             if ($resp->failed()) {
-                Log::error('Konnect API error', ['payment_ref' => $paymentRef, 'status' => $resp->status(), 'body' => $resp->body()]);
-                return response('Konnect API error', 500);
+                Log::error('Konnect webhook: failed to fetch payment', [
+                    'payment_ref' => $paymentRef,
+                    'status' => $resp->status(),
+                    'body' => $resp->body()
+                ]);
+                return response()->json(['message' => 'Failed to verify payment with Konnect'], 500);
             }
 
-            $payload = $resp->json();
-            $data = $payload['data'] ?? $payload;
+            $data = $resp->json();
 
-            $providerId = $data['id'] ?? $data['provider_payment_id'] ?? $paymentRef;
-            $status = $data['status'] ?? null;
-            $amount = $data['amount'] ?? null;
-            $currency = $data['currency'] ?? 'TND';
+            // Extraire le statut
+            $status   = $data['payment']['status'] 
+                        ?? ($data['payment']['transactions'][0]['status'] ?? null);
+            $orderId  = $data['payment']['orderId'] ?? null;
+            $konnectId = $data['payment']['id'] ?? null;
 
-            // Idempotent create/update
-            $payment = Payment::firstOrNew(['provider_payment_id' => $providerId]);
-            $payment->amount = $amount ?? $payment->amount ?? 0;
-            $payment->currency = $currency;
-            $payment->status = $status ?? $payment->status ?? 'unknown';
-            $payment->save();
+            if (!$status) {
+                Log::info('Konnect webhook: status not found', [
+                    'payment_ref' => $paymentRef,
+                    'payload' => $data
+                ]);
+                return response()->json(['message' => 'Status non final: null'], 200);
+            }
 
-            // Exemple : activer subscription si nécessaire
-            if ($payment->subscription_id && in_array($payment->status, ['success','completed','succeeded'])) {
-                $sub = Subscription::find($payment->subscription_id);
-                if ($sub) {
-                    $sub->status = 'active';
-                    $sub->save();
+            // Rechercher le paiement local
+            $payment = Payment::where('provider_payment_id', $paymentRef)
+                        ->orWhere('provider_payment_id', $orderId)
+                        ->orWhere('provider_payment_id', $konnectId)
+                        ->first();
+
+            if (!$payment) {
+                Log::info('Konnect webhook: local payment not found', [
+                    'payment_ref' => $paymentRef,
+                    'payload' => $data
+                ]);
+                return response()->json(['message' => 'Payment local introuvable, logged'], 200);
+            }
+
+            // Mise à jour du statut
+            $statusLower = strtolower($status);
+
+            if (in_array($statusLower, ['success', 'paid', 'completed'])) {
+                if ($payment->status !== 'completed') {
+                    $payment->markCompleted();
+                    if ($payment->subscription && $payment->subscription->status !== 'active') {
+                        $payment->subscription->status = 'active';
+                        $payment->subscription->save();
+                    }
+                    Log::info('Konnect webhook: payment completed', ['payment_id' => $payment->id]);
                 }
+                return response()->json(['message' => 'Payment processed (completed)'], 200);
             }
 
-            Log::info('Konnect callback processed', ['payment_ref' => $paymentRef, 'status' => $payment->status]);
-            return response()->json(['message' => 'ok'], 200);
+            if (in_array($statusLower, ['failed', 'error'])) {
+                if ($payment->status !== 'failed') {
+                    $payment->markFailed();
+                    if ($payment->subscription) {
+                        $payment->subscription->status = 'cancelled';
+                        $payment->subscription->save();
+                    }
+                    Log::info('Konnect webhook: payment failed', ['payment_id' => $payment->id]);
+                }
+                return response()->json(['message' => 'Payment processed (failed)'], 200);
+            }
+
+            // Statut non final
+            Log::info('Konnect webhook: non-final status', [
+                'payment_id' => $payment->id,
+                'status' => $status,
+            ]);
+
+            return response()->json(['message' => 'Status non final: ' . $status], 200);
 
         } catch (\Throwable $e) {
-            Log::error('Exception checking Konnect payment', ['err' => $e->getMessage()]);
-            return response('Error', 500);
+            Log::error('Konnect webhook: exception', [
+                'error' => $e->getMessage(),
+                'payment_ref' => $paymentRef,
+                'payload' => $request->all()
+            ]);
+            return response()->json(['message' => 'Server error'], 500);
         }
     }
 }

@@ -15,23 +15,52 @@ use App\Http\Controllers\SubscriptionPlanController;
 use App\Http\Controllers\SubscriptionController;
 use App\Http\Controllers\PaymentController;
 use App\Http\Controllers\KonnectWebhookController;
+
 Route::post('register', [AuthController::class, 'register']);
 Route::post('login', [AuthController::class, 'login']);
 
+// webhook public (Konnect calls it). On utilise token optionnel dans la query string ou header.
+Route::post('konnect/webhook', App\Http\Controllers\KonnectWebhookController::class);
+Route::get('konnect/webhook', App\Http\Controllers\KonnectWebhookController::class); // Konnect peut envoyer GET selon doc
+
+Route::post('/konnect/callback', KonnectWebhookController::class)
+    ->withoutMiddleware(['auth:sanctum']); // désactive auth pour ce webhook
+Route::get('/konnect/callback', KonnectWebhookController::class)
+    ->withoutMiddleware(['auth:sanctum']);
 Route::middleware('auth:sanctum')->group(function () {
     Route::get('profile', [AuthController::class, 'profile']);
     Route::post('logout', [AuthController::class, 'logout']);
-});
-Route::middleware(['auth:sanctum', 'admin'])->post('/agents', [AgentController::class, 'store']);
 
-Route::get('/users', [UserController::class, 'index']);
-Route::get('/users/{id}', [UserController::class, 'show']);
+    Route::middleware('admin')->post('/agents', [AgentController::class, 'store']);
 
-Route::middleware('auth:sanctum')->group(function () {
+    Route::get('/users', [UserController::class, 'index']);
+    Route::get('/users/{id}', [UserController::class, 'show']);
+
     Route::apiResource('tickets', TicketController::class);
+    Route::apiResource('tickets.responses', TicketResponseController::class)->shallow();
+
+    Route::apiResource('departments', DepartmentController::class);
+    Route::get('departments/{department}/tickets', [TicketController::class, 'ticketsByDepartment']);
+
+    // CRUD horaires par agent
+    Route::get('agents/{agent}/schedules', [ScheduleController::class, 'index']);
+    Route::post('agents/{agent}/schedules', [ScheduleController::class, 'store']);
+    Route::get('schedules/{schedule}', [ScheduleController::class, 'show']);
+    Route::put('schedules/{schedule}', [ScheduleController::class, 'update']);
+    Route::delete('schedules/{schedule}', [ScheduleController::class, 'destroy']);
+
+    // CRUD notes internes par ticket
+    Route::get('tickets/{ticket}/internal-notes', [InternalNoteController::class, 'index']);
+    Route::post('tickets/{ticket}/internal-notes', [InternalNoteController::class, 'store']);
+    Route::get('internal-notes/{internalNote}', [InternalNoteController::class, 'show']);
+    Route::put('internal-notes/{internalNote}', [InternalNoteController::class, 'update']);
+    Route::delete('internal-notes/{internalNote}', [InternalNoteController::class, 'destroy']);
+
+    // Subscription / Payment administration by authenticated users
+    Route::apiResource('subscription-plans', SubscriptionPlanController::class);
+    Route::apiResource('subscriptions', SubscriptionController::class);
+    Route::apiResource('payments', PaymentController::class);
 });
-Route::get('/tickets', [TicketController::class, 'index']);
-Route::get('/tickets/{id}', [TicketController::class, 'show']);
 
 Route::post('/test-email', function (Request $request) {
     Mail::raw('Ceci est un test d\'email via Laravel et MailHog.', function ($message) use ($request) {
@@ -41,36 +70,3 @@ Route::post('/test-email', function (Request $request) {
 
     return response()->json(['message' => 'Email envoyé']);
 });
-
-Route::middleware('auth:sanctum')->group(function () {
-    // Nested + shallow : index/store utilisent {ticket}, show/update/destroy utilisent {response}
-    Route::apiResource('tickets.responses', TicketResponseController::class)->shallow();
-});
-
-
-Route::apiResource('departments', DepartmentController::class);
-Route::get('departments/{department}/tickets', [TicketController::class, 'ticketsByDepartment']);
-
-// CRUD horaires par agent
-Route::get('agents/{agent}/schedules', [ScheduleController::class, 'index']);
-Route::post('agents/{agent}/schedules', [ScheduleController::class, 'store']);
-Route::get('schedules/{schedule}', [ScheduleController::class, 'show']);
-Route::put('schedules/{schedule}', [ScheduleController::class, 'update']);
-Route::delete('schedules/{schedule}', [ScheduleController::class, 'destroy']);
-
-// CRUD notes internes par ticket
-Route::get('tickets/{ticket}/internal-notes', [InternalNoteController::class, 'index']);
-Route::post('tickets/{ticket}/internal-notes', [InternalNoteController::class, 'store']);
-Route::get('internal-notes/{internalNote}', [InternalNoteController::class, 'show']);
-Route::put('internal-notes/{internalNote}', [InternalNoteController::class, 'update']);
-Route::delete('internal-notes/{internalNote}', [InternalNoteController::class, 'destroy']);
-
-
-Route::middleware('auth:sanctum')->group(function () {
-    Route::apiResource('subscription-plans', SubscriptionPlanController::class);
-    Route::apiResource('subscriptions', SubscriptionController::class);
-    Route::apiResource('payments', PaymentController::class);
-});
-
-// webhook (public endpoint, vérification par signature)
-Route::post('konnect/webhook', KonnectWebhookController::class);

@@ -4,8 +4,10 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
-use Illuminate\Database\Eloquent\Casts\Attribute;
 use InvalidArgumentException;
+use App\Models\User;
+use App\Models\Subscription;
+use App\Models\InternalNote;
 
 class Ticket extends Model
 {
@@ -36,12 +38,28 @@ class Ticket extends Model
             ->where('role', 'agent');
     }
 
+    public function subscription(): BelongsTo
+    {
+        return $this->belongsTo(Subscription::class);
+    }
+
+    public function responses()
+    {
+        return $this->hasMany(\App\Models\TicketResponse::class);
+    }
+
+    public function internalNotes()
+    {
+        return $this->hasMany(InternalNote::class);
+    }
+
+    // Mutators - vérifient l'existence et le rôle (lève exception si invalide)
     public function setAgentassigneIdAttribute($value)
     {
         if ($value && !User::where('id', $value)->where('role', 'agent')->exists()) {
             throw new InvalidArgumentException("L'utilisateur assigné doit être un agent");
         }
-        
+
         $this->attributes['agentassigne_id'] = $value;
     }
 
@@ -50,20 +68,7 @@ class Ticket extends Model
         if (!User::where('id', $value)->where('role', 'client')->exists()) {
             throw new InvalidArgumentException("L'utilisateur doit être un client");
         }
-        
+
         $this->attributes['client_id'] = $value;
     }
-    public function responses()
-{
-    return $this->hasMany(\App\Models\TicketResponse::class);
-}
-public function internalNotes()
-{
-    return $this->hasMany(InternalNote::class);
-}
-    public function subscription(): BelongsTo
-    {
-        return $this->belongsTo(Subscription::class);
-    }
-
 }

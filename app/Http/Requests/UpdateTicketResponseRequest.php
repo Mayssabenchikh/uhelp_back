@@ -3,13 +3,14 @@
 namespace App\Http\Requests;
 
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Support\Facades\Auth;
 
 class UpdateTicketResponseRequest extends FormRequest
 {
     public function authorize(): bool
     {
-        // On autorise, et on laisse le contrôleur vérifier si l'utilisateur peut modifier
-        return true;
+        return Auth::check();
+
     }
 
     public function rules(): array
