@@ -6,6 +6,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use App\Models\Payment;
+use App\Events\PaymentCompleted;
 
 class KonnectWebhookController extends Controller
 {
@@ -44,9 +45,9 @@ class KonnectWebhookController extends Controller
             $data = $resp->json();
 
             // Extraire le statut
-            $status   = $data['payment']['status'] 
-                        ?? ($data['payment']['transactions'][0]['status'] ?? null);
-            $orderId  = $data['payment']['orderId'] ?? null;
+            $status    = $data['payment']['status'] 
+                         ?? ($data['payment']['transactions'][0]['status'] ?? null);
+            $orderId   = $data['payment']['orderId'] ?? null;
             $konnectId = $data['payment']['id'] ?? null;
 
             if (!$status) {
@@ -71,16 +72,23 @@ class KonnectWebhookController extends Controller
                 return response()->json(['message' => 'Payment local introuvable, logged'], 200);
             }
 
-            // Mise à jour du statut
+            // Normaliser le statut
             $statusLower = strtolower($status);
 
             if (in_array($statusLower, ['success', 'paid', 'completed'])) {
                 if ($payment->status !== 'completed') {
+                    // Marquer le paiement comme complété
                     $payment->markCompleted();
+
+                    // Déclencher l'event pour générer invoice et activer subscription
+                    event(new PaymentCompleted($payment));
+
+                    // Activer la subscription si elle existe
                     if ($payment->subscription && $payment->subscription->status !== 'active') {
                         $payment->subscription->status = 'active';
                         $payment->subscription->save();
                     }
+
                     Log::info('Konnect webhook: payment completed', ['payment_id' => $payment->id]);
                 }
                 return response()->json(['message' => 'Payment processed (completed)'], 200);

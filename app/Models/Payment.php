@@ -58,4 +58,9 @@ class Payment extends Model
         $this->save();
         return $this->fresh();
     }
+    public function invoice()
+{
+    return $this->hasOne(\App\Models\Invoice::class, 'payment_id');
+}
+
 }

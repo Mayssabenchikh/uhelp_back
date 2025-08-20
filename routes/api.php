@@ -16,6 +16,7 @@ use App\Http\Controllers\SubscriptionController;
 use App\Http\Controllers\PaymentController;
 use App\Http\Controllers\KonnectWebhookController;
 
+use App\Http\Controllers\Admin\InvoiceController;
 Route::post('register', [AuthController::class, 'register']);
 Route::post('login', [AuthController::class, 'login']);
 
@@ -69,4 +70,11 @@ Route::post('/test-email', function (Request $request) {
     });
 
     return response()->json(['message' => 'Email envoyé']);
+});
+
+
+
+Route::middleware(['auth:sanctum','role:admin'])->group(function () {
+    Route::apiResource('admin/invoices', InvoiceController::class);
+    Route::get('admin/invoices/{invoice}/pdf', [InvoiceController::class, 'downloadPdf']);
 });
