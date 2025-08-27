@@ -20,17 +20,32 @@ class InvoicePaid extends Mailable
 
     public function build()
     {
-        $pdfPath = $this->invoice->meta['pdf_path'] ?? null;
+        // Sujet du mail
         $mail = $this->subject('Votre facture ' . $this->invoice->invoice_number)
-                     ->markdown('emails.invoices.paid')
-                     ->with(['invoice' => $this->invoice]);
+                     // Utilise ta vue HTML personnalisée (PAS markdown)
+                     ->view('emails.invoices.paid')
+                     ->with([
+                         'invoice' => $this->invoice,
+                     ]);
 
-        if ($pdfPath && \Illuminate\Support\Facades\Storage::exists($pdfPath)) {
-            $fullPath = Storage::path($pdfPath);
-            $mail->attach($fullPath, [
-                'as' => basename($fullPath),
-                'mime' => 'application/pdf',
-            ]);
+        // Attacher le PDF si présent (méthode robuste pour local ou cloud)
+        $pdfPath = $this->invoice->meta['pdf_path'] ?? null;
+
+        if ($pdfPath && Storage::exists($pdfPath)) {
+            try {
+                // Essaye d'obtenir un chemin local (fonctionne pour disque local)
+                $fullPath = Storage::path($pdfPath);
+                $mail->attach($fullPath, [
+                    'as' => basename($fullPath),
+                    'mime' => 'application/pdf',
+                ]);
+            } catch (\Throwable $e) {
+                // Si Storage::path() n'est pas disponible (ex: S3), attache les données en mémoire
+                $pdfData = Storage::get($pdfPath);
+                $mail->attachData($pdfData, basename($pdfPath), [
+                    'mime' => 'application/pdf',
+                ]);
+            }
         }
 
         return $mail;

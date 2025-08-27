@@ -8,7 +8,7 @@ use Illuminate\Support\Facades\Validator;
 use App\Models\User;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Validation\ValidationException;
-
+use Illuminate\Auth\Events\Registered; 
 class AuthController extends Controller
 {
     public function register(Request $request)
@@ -41,6 +41,7 @@ class AuthController extends Controller
             'password' => Hash::make($request->password),
             'role' => 'client',
         ]);
+        event(new Registered($user));
 
         $token = $user->createToken('auth_token')->plainTextToken;
 
@@ -65,7 +66,12 @@ public function login(Request $request)
     if (! $user || ! Hash::check($request->password, $user->password)) {
         return response()->json(['message' => 'Identifiants invalides'], 401);
     }
-
+ if (!$user->hasVerifiedEmail()) {
+            return response()->json([
+                'status' => false,
+                'message' => 'Please verify your email address before logging in.'
+            ], 403);
+        }
     // Création du token API
     $token = $user->createToken('api-token')->plainTextToken;
 

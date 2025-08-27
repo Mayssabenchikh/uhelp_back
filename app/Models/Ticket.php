@@ -71,4 +71,9 @@ class Ticket extends Model
 
         $this->attributes['client_id'] = $value;
     }
+    public function feedback()
+{
+    return $this->hasOne(Feedback::class);
+}
+
 }

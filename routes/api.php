@@ -15,6 +15,8 @@ use App\Http\Controllers\SubscriptionPlanController;
 use App\Http\Controllers\SubscriptionController;
 use App\Http\Controllers\PaymentController;
 use App\Http\Controllers\KonnectWebhookController;
+use App\Http\Controllers\EmailVerificationController;
+use App\Http\Controllers\FeedbackController;
 
 use App\Http\Controllers\Admin\InvoiceController;
 Route::post('register', [AuthController::class, 'register']);
@@ -36,7 +38,10 @@ Route::middleware('auth:sanctum')->group(function () {
 
     Route::get('/users', [UserController::class, 'index']);
     Route::get('/users/{id}', [UserController::class, 'show']);
-
+    Route::delete('/users/{id}', [UserController::class, 'destroy']);
+    Route::put('/users/{id}', [UserController::class, 'update']);
+    Route::post('/tickets/{ticket}/feedback', [FeedbackController::class, 'store']);
+    Route::get('/tickets/{ticket}/feedback', [FeedbackController::class, 'show']);
     Route::apiResource('tickets', TicketController::class);
     Route::apiResource('tickets.responses', TicketResponseController::class)->shallow();
 
@@ -78,3 +83,13 @@ Route::middleware(['auth:sanctum','role:admin'])->group(function () {
     Route::apiResource('admin/invoices', InvoiceController::class);
     Route::get('admin/invoices/{invoice}/pdf', [InvoiceController::class, 'downloadPdf']);
 });
+Route::get('/email/verify/{id}/{hash}', [EmailVerificationController::class, 'verify'])
+    ->middleware(['signed','throttle:6,1']) // signed vérifie la signature ; throttle pour limiter les abus
+    ->name('verification.verify');
+
+// Pour renvoyer le mail, garde auth (car seul user authentifié peut demander renvoi)
+Route::post('/email/verification-notification', [EmailVerificationController::class,'resend'])
+    ->middleware(['auth:sanctum','throttle:6,1'])
+    ->name('verification.send');
+
+
