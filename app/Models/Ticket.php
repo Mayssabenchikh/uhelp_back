@@ -25,7 +25,33 @@ class Ticket extends Model
     protected $casts = [
         'closed_at' => 'datetime',
     ];
+  protected static function booted()
+    {
+        // Lors de la création
+        static::creating(function ($ticket) {
+            if (($ticket->statut ?? null) === 'closed' && empty($ticket->closed_at)) {
+                $ticket->closed_at = now();
+            }
+        });
 
+        // Lors de la mise à jour
+        static::updating(function ($ticket) {
+            if ($ticket->isDirty('statut')) {
+                $old = $ticket->getOriginal('statut');
+                $new = $ticket->statut;
+
+                // Passage -> closed
+                if ($old !== 'closed' && $new === 'closed') {
+                    $ticket->closed_at = now();
+                }
+
+                // Re-ouverture -> clear closed_at
+                if ($old === 'closed' && $new !== 'closed') {
+                    $ticket->closed_at = null;
+                }
+            }
+        });
+    }
     public function client(): BelongsTo
     {
         return $this->belongsTo(User::class, 'client_id')

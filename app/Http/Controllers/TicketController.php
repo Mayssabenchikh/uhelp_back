@@ -15,15 +15,31 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
-
+use Illuminate\Support\Facades\Validator;
 class TicketController extends Controller
 {
-    public function index(Request $request)
-    {
-        $perPage = $request->get('per_page', 15);
-        $tickets = Ticket::with(['client','agent'])->orderBy('created_at','desc')->paginate($perPage);
-        return response()->json($tickets);
+   public function index(Request $request)
+{
+    $perPage = $request->get('per_page', 15);
+
+    $user = Auth::user();
+
+    $query = Ticket::with(['client', 'agent'])->orderBy('created_at', 'desc');
+
+    if ($user->role === 'client') {
+        // Un client ne voit que ses tickets
+        $query->where('client_id', $user->id);
+    } elseif ($user->role === 'agent') {
+        // Un agent ne voit que les tickets qui lui sont assignés
+        $query->where('agentassigne_id', $user->id);
     }
+    // Si admin → pas de restriction, il voit tout
+
+    $tickets = $query->paginate($perPage);
+
+    return response()->json($tickets);
+}
+
 
     /**
      * Crée un ticket en vérifiant la subscription du client et en incrémentant atomiquement tickets_used.
@@ -181,4 +197,82 @@ class TicketController extends Controller
             'tickets' => $tickets
         ]);
     }
+  public function assignAgent(Request $request, Ticket $ticket)
+{
+    $user = $request->user();
+
+    // sécurité : s'assurer que l'utilisateur est connecté et a le bon rôle
+    if (!$user || ! in_array($user->role, ['admin', 'agent'])) {
+        return response()->json(['message' => 'Unauthorized'], 403);
+    }
+
+    // accepter agent_id ou agentId (fronts différents)
+    $input = $request->all();
+    $agentIdRaw = $request->input('agent_id', $request->input('agentId', null));
+
+    $validator = Validator::make(['agent_id' => $agentIdRaw], [
+        'agent_id' => 'required|integer|exists:users,id',
+    ]);
+
+    if ($validator->fails()) {
+        return response()->json(['message' => 'Validation failed', 'errors' => $validator->errors()], 422);
+    }
+
+    $agentId = (int) $agentIdRaw;
+
+    // Vérifie que l'utilisateur sélectionné est bien un agent
+    $agent = User::where('id', $agentId)->where('role', 'agent')->first();
+
+    if (! $agent) {
+        return response()->json(['message' => 'Agent introuvable ou rôle invalide'], 422);
+    }
+
+    $oldAgent = $ticket->agentassigne_id;
+
+    // pas d'opération si on ré-assigne au même agent
+    if (!is_null($oldAgent) && (int)$oldAgent === $agentId) {
+        return response()->json([
+            'message' => 'No change: agent already assigned',
+            'ticket' => $ticket->load('client','agent')
+        ], 200);
+    }
+
+    try {
+        DB::transaction(function () use ($ticket, $agentId, &$oldAgent) {
+            // reload for update protection
+            $ticket = Ticket::lockForUpdate()->find($ticket->id);
+            if (! $ticket) {
+                throw new \RuntimeException('Ticket introuvable pendant la transaction');
+            }
+
+            $oldAgent = $ticket->agentassigne_id;
+            $ticket->agentassigne_id = $agentId;
+            $ticket->save();
+        });
+
+        // notifier le nouvel agent (on passe l'ancien agent en second param si tu l'utilises)
+        try {
+            $agent->notify(new TicketAssigned($ticket->load('client','agent'), $oldAgent));
+            // notifier l'ancien agent si différent
+            if ($oldAgent && (int)$oldAgent !== (int)$agentId) {
+                $old = User::find($oldAgent);
+                if ($old) {
+                    $old->notify(new TicketAssigned($ticket->load('client','agent'), null));
+                }
+            }
+        } catch (\Throwable $notifyEx) {
+            // ne pas faire échouer l'action principale à cause d'une notification qui plante
+            Log::warning('Notification failed on assignAgent: ' . $notifyEx->getMessage());
+        }
+
+        return response()->json([
+            'message' => 'Agent assigned',
+            'ticket' => $ticket->load('client','agent')
+        ], 200);
+    } catch (\Throwable $e) {
+        Log::error('assignAgent error: ' . $e->getMessage(), ['ticket_id' => $ticket->id ?? null, 'agent_id' => $agentId]);
+        return response()->json(['message' => 'Erreur lors de l\'assignation', 'error' => $e->getMessage()], 500);
+    }
+}
+
 }

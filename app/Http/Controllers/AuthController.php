@@ -44,6 +44,8 @@ class AuthController extends Controller
         event(new Registered($user));
 
         $token = $user->createToken('auth_token')->plainTextToken;
+// après avoir créé $user
+$user->sendEmailVerificationNotification();
 
         return response()->json([
             'status'      => true,
