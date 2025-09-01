@@ -7,8 +7,8 @@ use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Validator;
 use App\Models\User;
 use Illuminate\Support\Facades\Auth;
-use Illuminate\Validation\ValidationException;
-use Illuminate\Auth\Events\Registered; 
+use Illuminate\Auth\Events\Registered;
+
 class AuthController extends Controller
 {
     public function register(Request $request)
@@ -27,7 +27,7 @@ class AuthController extends Controller
                     'errors'  => $validator->errors(),
                 ], 422);
             }
-            
+
             return response()->json([
                 'status'  => false,
                 'message' => 'Validation error',
@@ -39,50 +39,64 @@ class AuthController extends Controller
             'name'     => $request->name,
             'email'    => $request->email,
             'password' => Hash::make($request->password),
-            'role' => 'client',
+            'role'     => 'client',
         ]);
+
+        // event pour email verification si tu utilises MustVerifyEmail
         event(new Registered($user));
 
+        // create personal access token (plainTextToken)
         $token = $user->createToken('auth_token')->plainTextToken;
-// après avoir créé $user
-$user->sendEmailVerificationNotification();
+
+        // send verification email (optional)
+        if (method_exists($user, 'sendEmailVerificationNotification')) {
+            $user->sendEmailVerificationNotification();
+        }
+
+        // retourne user sans le password
+        $userSafe = $user->makeHidden(['password', 'remember_token']);
 
         return response()->json([
-            'status'      => true,
-            'message'     => 'User registered successfully',
-            'access_token'=> $token,
-            'token_type'  => 'Bearer',
-            'user'        => $user,
+            'status'       => true,
+            'message'      => 'User registered successfully',
+            'access_token' => $token,
+            'token_type'   => 'Bearer',
+            'user'         => $userSafe,
         ], 201);
     }
 
-public function login(Request $request)
-{
-    $request->validate([
-        'email'    => 'required|email',
-        'password' => 'required',
-    ]);
+    public function login(Request $request)
+    {
+        $request->validate([
+            'email'    => 'required|email',
+            'password' => 'required',
+        ]);
 
-    $user = User::where('email', $request->email)->first();
+        $user = User::where('email', $request->email)->first();
 
-    if (! $user || ! Hash::check($request->password, $user->password)) {
-        return response()->json(['message' => 'Identifiants invalides'], 401);
-    }
- if (!$user->hasVerifiedEmail()) {
+        if (! $user || ! Hash::check($request->password, $user->password)) {
+            return response()->json(['message' => 'Identifiants invalides'], 401);
+        }
+
+        if (method_exists($user, 'hasVerifiedEmail') && ! $user->hasVerifiedEmail()) {
             return response()->json([
                 'status' => false,
                 'message' => 'Please verify your email address before logging in.'
             ], 403);
         }
-    // Création du token API
-    $token = $user->createToken('api-token')->plainTextToken;
 
-    return response()->json([
-        'message' => 'Connexion réussie',
-        'access_token' => $token,
-        'user' => $user,
-    ], 200);
-}
+        // Création du token API (personal access token)
+        $token = $user->createToken('api-token')->plainTextToken;
+
+        $userSafe = $user->makeHidden(['password', 'remember_token']);
+
+        return response()->json([
+            'message'      => 'Connexion réussie',
+            'access_token' => $token,
+            'token_type'   => 'Bearer',
+            'user'         => $userSafe,
+        ], 200);
+    }
 
     public function profile()
     {
@@ -94,7 +108,11 @@ public function login(Request $request)
 
     public function logout(Request $request)
     {
-        $request->user()->tokens()->where('id', $request->user()->currentAccessToken()->id)->delete();
+        // supprime le token courant
+        $currentToken = $request->user()->currentAccessToken();
+        if ($currentToken) {
+            $request->user()->tokens()->where('id', $currentToken->id)->delete();
+        }
 
         return response()->json([
             'status'  => true,

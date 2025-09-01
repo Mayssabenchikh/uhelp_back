@@ -21,5 +21,5 @@ return [
     'max_age' => 0,
 
     // si tu utilises cookies/Sanctum (avec credentials) -> mettre true
-    'supports_credentials' => true,
+    'supports_credentials' => false,
 ];

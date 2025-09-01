@@ -14,22 +14,22 @@ return Application::configure(basePath: dirname(__DIR__))
         health: '/up',
     )
     ->withMiddleware(function (Middleware $middleware): void {
-    $middleware->append([
-        HandleCors::class,
-    ]);
+        $middleware->append([
+            \App\Http\Middleware\Cors::class, // ton middleware CORS
+        ]);
 
-    $middleware->group('api', [
-        \Laravel\Sanctum\Http\Middleware\EnsureFrontendRequestsAreStateful::class,
-        'throttle:api',
-        \Illuminate\Routing\Middleware\SubstituteBindings::class,
-    ]);
-       $middleware->alias([
-        'admin' => \App\Http\Middleware\AdminMiddleware::class,
-        'role' => \App\Http\Middleware\EnsureRole::class,
-        'verified' => \Illuminate\Auth\Middleware\EnsureEmailIsVerified::class,
+        $middleware->group('api', [
+            // Retiré EnsureFrontendRequestsAreStateful pour token-based API
+            'throttle:api',
+            \Illuminate\Routing\Middleware\SubstituteBindings::class,
+        ]);
 
-    ]);
-})
+        $middleware->alias([
+            'admin' => \App\Http\Middleware\AdminMiddleware::class,
+            'role' => \App\Http\Middleware\EnsureRole::class,
+            'verified' => \Illuminate\Auth\Middleware\EnsureEmailIsVerified::class,
+        ]);
+    })
     ->withExceptions(function (Exceptions $exceptions): void {
         //
     })

@@ -53,42 +53,47 @@ $user->sendEmailVerificationNotification();
         return response()->json(['message' => 'User created successfully', 'user' => $user], 201);
     }
 
-    // Mettre à jour un utilisateur (y compris remplacer la photo)
-    public function update(Request $request, $id)
-    {
-        $user = User::findOrFail($id);
+   public function update(Request $request, $id)
+{
+    $user = User::findOrFail($id);
 
-        $validated = $request->validate([
-    'name'          => 'required|string|max:255',
-    'email'         => 'required|email|unique:users,email',
-    'password'      => 'required|string|min:6',
-    'role'          => ['required', Rule::in(['admin', 'agent', 'client'])],
-    'profile_photo' => 'nullable|image|max:2048',
-    'phone_number'  => 'nullable|string|max:20',
-]);
+    $validated = $request->validate([
+        'name' => ['sometimes','string','max:255'],
+        'email' => ['sometimes','email','max:255', Rule::unique('users','email')->ignore($user->id)],
+        'password' => ['sometimes','nullable','string','min:6'],
+        'role' => ['sometimes', Rule::in(['admin','agent','client'])],
+        'profile_photo' => ['sometimes','nullable','image','max:2048'],
+        'phone_number' => ['sometimes','nullable','string','max:20'],
+    ]);
 
-        // Si mot de passe fourni -> hasher
-        if (!empty($validated['password'])) {
-            $validated['password'] = Hash::make($validated['password']);
-        } else {
-            unset($validated['password']);
-        }
-
-        // Si nouvelle photo fournie -> supprimer ancienne (si existe) et stocker la nouvelle
-        if ($request->hasFile('profile_photo')) {
-            // supprimer l'ancienne photo si présente
-            if ($user->profile_photo && Storage::disk('public')->exists($user->profile_photo)) {
-                Storage::disk('public')->delete($user->profile_photo);
-            }
-
-            $path = $request->file('profile_photo')->store('profile_photos', 'public');
-            $validated['profile_photo'] = $path;
-        }
-
-        $user->update($validated);
-
-        return response()->json(['message' => 'User updated successfully', 'user' => $user]);
+    // Hasher le mot de passe si fourni
+    if (array_key_exists('password', $validated) && !empty($validated['password'])) {
+        $validated['password'] = Hash::make($validated['password']);
+    } else {
+        unset($validated['password']);
     }
+
+    // Gérer l'upload
+    if ($request->hasFile('profile_photo')) {
+        // supprimer l'ancienne si existe
+        if ($user->profile_photo && Storage::disk('public')->exists($user->profile_photo)) {
+            Storage::disk('public')->delete($user->profile_photo);
+        }
+
+        $path = $request->file('profile_photo')->store('profile_photos', 'public');
+        $validated['profile_photo'] = $path;
+    }
+
+    $user->update($validated);
+
+    // Ajouter une url publique pour l'avatar (pratique côté frontend)
+    $profilePhotoUrl = $user->profile_photo ? asset('storage/' . $user->profile_photo) : null;
+
+    $user->profile_photo_url = $profilePhotoUrl;
+
+    return response()->json(['message' => 'User updated successfully', 'user' => $user]);
+}
+
 
     // Supprimer un utilisateur
     public function destroy($id)
