@@ -8,21 +8,23 @@ use Illuminate\Notifications\Notifiable;
 use Laravel\Sanctum\HasApiTokens;
 use Illuminate\Contracts\Auth\MustVerifyEmail;
 use Illuminate\Support\Facades\Storage;
+use App\Models\Ticket;
+use App\Models\Department;
 
 class User extends Authenticatable implements MustVerifyEmail
 {
     use HasApiTokens, Notifiable, HasFactory;
 
-  protected $fillable = [
-    'name',
-    'email',
-    'password',
-    'role',
-    'department_id',
-    'profile_photo',
-    'phone_number',
-];
-
+    protected $fillable = [
+        'name',
+        'email',
+        'password',
+        'role',
+        'department_id',
+        'profile_photo',
+        'phone_number',
+        'location', // ajouté
+    ];
 
     protected $hidden = [
         'password',
@@ -70,5 +72,25 @@ class User extends Authenticatable implements MustVerifyEmail
 
         // Storage disk 'public' mappe sur /storage via storage:link
         return Storage::disk('public')->url($this->profile_photo);
+    }
+   public function createdTickets()
+    {
+        return $this->hasMany(Ticket::class, 'client_id');
+    }
+
+    /**
+     * Tickets assignés à cet utilisateur (en tant qu'agent)
+     */
+    public function assignedTickets()
+    {
+        return $this->hasMany(Ticket::class, 'agentassigne_id');
+    }
+
+    /**
+     * Tickets résolus par cet agent (agentassigne_id + statut = closed)
+     */
+    public function resolvedTickets()
+    {
+        return $this->hasMany(Ticket::class, 'agentassigne_id')->where('statut', 'closed');
     }
 }

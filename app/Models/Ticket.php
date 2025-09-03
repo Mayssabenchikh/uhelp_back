@@ -8,9 +8,12 @@ use InvalidArgumentException;
 use App\Models\User;
 use App\Models\Subscription;
 use App\Models\InternalNote;
+use Illuminate\Database\Eloquent\SoftDeletes;
 
 class Ticket extends Model
 {
+     use SoftDeletes;
+
     protected $fillable = [
         'titre',
         'description',
@@ -18,14 +21,17 @@ class Ticket extends Model
         'client_id',
         'agentassigne_id',
         'priorite',
+        'category',        // ajouté
         'closed_at',
         'subscription_id',
     ];
+    protected $dates = ['deleted_at'];
 
     protected $casts = [
         'closed_at' => 'datetime',
     ];
-  protected static function booted()
+
+    protected static function booted()
     {
         // Lors de la création
         static::creating(function ($ticket) {
@@ -52,6 +58,7 @@ class Ticket extends Model
             }
         });
     }
+
     public function client(): BelongsTo
     {
         return $this->belongsTo(User::class, 'client_id')
@@ -97,9 +104,9 @@ class Ticket extends Model
 
         $this->attributes['client_id'] = $value;
     }
-    public function feedback()
-{
-    return $this->hasOne(Feedback::class);
-}
 
+    public function feedback()
+    {
+        return $this->hasOne(\App\Models\Feedback::class);
+    }
 }

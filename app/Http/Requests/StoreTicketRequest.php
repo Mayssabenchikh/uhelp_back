@@ -18,7 +18,7 @@ class StoreTicketRequest extends FormRequest
         return [
             'titre' => 'required|string|max:255',
             'description' => 'required|string',
-            'statut' => ['sometimes','required','string', Rule::in(['open','in_progress','closed'])],
+            'statut' => ['sometimes','required','string', Rule::in(['open','in_progress','resolved','closed'])],
             'client_id' => [
                 'nullable','integer',
                 Rule::exists('users','id')->where(fn($query) => $query->where('role','client'))
@@ -28,6 +28,7 @@ class StoreTicketRequest extends FormRequest
                 Rule::exists('users','id')->where(fn($query) => $query->where('role','agent'))
             ],
             'priorite' => ['nullable','string', Rule::in(['low','medium','high'])],
+            'category' => ['nullable','string', Rule::in(['technical','billing','feature-request','bug-report','other'])],
         ];
     }
 }

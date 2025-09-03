@@ -24,6 +24,7 @@ use App\Http\Controllers\AttachmentController;
 use App\Http\Controllers\GroupController;
 use App\Http\Controllers\Admin\InvoiceController;
 use App\Http\Controllers\DashboardController;
+use App\Http\Controllers\TrashedTicketController;
 
 /*
 |--------------------------------------------------------------------------
@@ -46,18 +47,16 @@ Route::get('konnect/webhook', KonnectWebhookController::class);
 Route::post('/konnect/callback', KonnectWebhookController::class)->withoutMiddleware(['auth:sanctum']);
 Route::get('/konnect/callback', KonnectWebhookController::class)->withoutMiddleware(['auth:sanctum']);
 
-// Route de vérification (DOIT être disponible et nommée: verification.verify)
-// Important: ne pas mettre auth:sanctum ici — protection par 'signed' + throttle
+// Email verification (signed + throttle) — NOT auth:sanctum
 Route::get('/email/verify/{id}/{hash}', [EmailVerificationController::class, 'verify'])
     ->middleware(['signed', 'throttle:6,1'])
     ->name('verification.verify');
 
-// Route pour renvoyer le lien de vérification (l'utilisateur doit être authentifié)
 Route::post('/email/verification-notification', [EmailVerificationController::class, 'resend'])
     ->middleware(['auth:sanctum', 'throttle:6,1'])
     ->name('verification.send');
 
-// Route de test d'email (publique, utile pour dev / MailHog)
+// Route de test d'email (publique)
 Route::post('/test-email', function (Request $request) {
     $email = $request->input('email');
 
@@ -69,8 +68,6 @@ Route::post('/test-email', function (Request $request) {
         Mail::raw("Ceci est un test d'email via Laravel.", function ($message) use ($email) {
             $message->to($email)
                     ->subject('Test Mail Laravel');
-            // From explicite si tu veux forcer:
-            // $message->from(config('mail.from.address'), config('mail.from.name') ?? 'UHelp');
         });
 
         return response()->json(['message' => 'Email envoyé (attempt)']);
@@ -96,15 +93,28 @@ Route::middleware('auth:sanctum')->group(function () {
     // Auth actions
     Route::get('profile', [AuthController::class, 'profile']);
     Route::post('logout', [AuthController::class, 'logout']);
+    Route::get('/me', [UserController::class, 'me']);
 
-    // Users (admin tools / listing)
-    Route::apiResource('users', UserController::class)->except(['create','edit']);
+  
+    // Users (listing, CRUD, export)
+    Route::get('users/export', [UserController::class, 'export']);
 
-    // Agents: liste publique pour auth, création uniquement pour admin
+    Route::apiResource('users', UserController::class);
+
+
+    // Agents
     Route::get('/agents', [AgentController::class, 'index']);
     Route::post('/agents', [AgentController::class, 'store'])->middleware('admin');
 
-    // Tickets & réponses (nested resource, responses shallow)
+    // Trashed tickets
+    Route::get('/tickets/trashed', [TrashedTicketController::class, 'index']);
+    Route::post('/tickets/trashed/restore', [TrashedTicketController::class, 'bulkRestore']);
+    Route::delete('/tickets/trashed', [TrashedTicketController::class, 'bulkForceDelete']);
+    Route::post('/tickets/{id}/restore', [TrashedTicketController::class, 'restore']);
+    Route::delete('/tickets/{id}/force', [TrashedTicketController::class, 'forceDelete']);
+    Route::post('tickets/trashed/auto-clean', [TrashedTicketController::class, 'autoCleanOld']);
+
+    // Tickets & responses
     Route::apiResource('tickets', TicketController::class);
     Route::apiResource('tickets.responses', TicketResponseController::class)->shallow();
 
@@ -116,7 +126,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::apiResource('departments', DepartmentController::class);
     Route::get('departments/{department}/tickets', [TicketController::class, 'ticketsByDepartment']);
 
-    // Schedules (horaires) par agent
+    // Schedules
     Route::get('agents/{agent}/schedules', [ScheduleController::class, 'index']);
     Route::post('agents/{agent}/schedules', [ScheduleController::class, 'store']);
     Route::get('schedules/{schedule}', [ScheduleController::class, 'show']);
@@ -130,12 +140,12 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::put('internal-notes/{internalNote}', [InternalNoteController::class, 'update']);
     Route::delete('internal-notes/{internalNote}', [InternalNoteController::class, 'destroy']);
 
-    // Subscriptions & payments (admin or allowed users)
+    // Subscriptions & payments
     Route::apiResource('subscription-plans', SubscriptionPlanController::class);
     Route::apiResource('subscriptions', SubscriptionController::class);
     Route::apiResource('payments', PaymentController::class);
 
-    // Chat / Conversations / Attachments
+    // Chat / Attachments
     Route::post('/conversations', [ChatController::class, 'createConversation']);
     Route::get('/chat/{conversation}/messages', [ChatController::class, 'getMessages']);
     Route::post('chat/send', [ChatController::class, 'send']);
@@ -155,15 +165,12 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/tickets/{ticket}/assign', [TicketController::class, 'assignAgent']);
 
     // Me
-    Route::get('/me', [UserController::class, 'me']);
 });
 
 /*
 |--------------------------------------------------------------------------
 | Admin-only routes
 |--------------------------------------------------------------------------
-|
-| Utilise middleware role:admin (auth déjà requis) pour l'admin area
 |
 */
 
