@@ -97,7 +97,7 @@ Route::middleware('auth:sanctum')->group(function () {
 
   
     // Users (listing, CRUD, export)
-    Route::get('users/export', [UserController::class, 'export']);
+    Route::get('/users/export', [UserController::class, 'export']);
 
     Route::apiResource('users', UserController::class);
 

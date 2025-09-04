@@ -8,6 +8,8 @@ use Illuminate\Support\Facades\Hash;
 use Illuminate\Validation\Rule;
 use Illuminate\Support\Facades\Storage;
 use App\Http\Resources\UserResource;
+use Symfony\Component\HttpFoundation\StreamedResponse;
+use Illuminate\Support\Facades\Response;
 
 class UserController extends Controller
 {
@@ -111,46 +113,59 @@ class UserController extends Controller
         return response()->json(['message' => 'User created successfully', 'user' => $user], 201);
     }
 
-    public function update(Request $request, $id)
-    {
-        $user = User::findOrFail($id);
+   // UserController.php
 
-        $validated = $request->validate([
-            'name' => ['sometimes','string','max:255'],
-            'email' => ['sometimes','email','max:255', Rule::unique('users','email')->ignore($user->id)],
-            'password' => ['sometimes','nullable','string','min:6'],
-            'role' => ['sometimes', Rule::in(['admin','agent','client'])],
-            'profile_photo' => ['sometimes','nullable','image','max:2048'],
-            'phone_number' => ['sometimes','nullable','string','max:20'],
-            'location' => ['sometimes','nullable','string','max:255'], // ajouté
-        ]);
+public function update(Request $request, $id)
+{
+    $user = User::findOrFail($id);
 
-        // Hasher le mot de passe si fourni
-        if (array_key_exists('password', $validated) && !empty($validated['password'])) {
-            $validated['password'] = Hash::make($validated['password']);
-        } else {
-            unset($validated['password']);
-        }
+    $validated = $request->validate([
+        'name'          => 'sometimes|required|string|max:255',
+        'email'         => [
+            'sometimes', 'required', 'email', 'max:255',
+            Rule::unique('users')->ignore($user->id),
+        ],
+        'password'      => 'nullable|string|min:6',
+        'role'          => 'sometimes|required|in:agent,client',
+        'phone_number'  => 'nullable|string|max:20',
+        'location'      => 'nullable|string|max:255',
+        'department_id' => 'nullable|exists:departments,id',
+        'profile_photo' => 'nullable|image|max:2048', // max 2MB
+        'remove_profile_photo' => 'nullable|boolean',
+    ]);
 
-        // Gérer l'upload
-        if ($request->hasFile('profile_photo')) {
-            // supprimer l'ancienne si existe
-            if ($user->profile_photo && Storage::disk('public')->exists($user->profile_photo)) {
-                Storage::disk('public')->delete($user->profile_photo);
-            }
+    // 🔹 Mise à jour des champs simples
+    $user->fill($validated);
 
-            $path = $request->file('profile_photo')->store('profile_photos', 'public');
-            $validated['profile_photo'] = $path;
-        }
-
-        $user->update($validated);
-
-        // Ajouter une url publique pour l'avatar (pratique côté frontend)
-        $profilePhotoUrl = $user->profile_photo ? asset('storage/' . $user->profile_photo) : null;
-        $user->profile_photo_url = $profilePhotoUrl;
-
-        return response()->json(['message' => 'User updated successfully', 'user' => $user]);
+    // 🔹 Gestion du mot de passe
+    if (!empty($validated['password'])) {
+        $user->password = Hash::make($validated['password']);
     }
+
+    // 🔹 Suppression de la photo si demandé
+    if ($request->boolean('remove_profile_photo')) {
+        if ($user->profile_photo && Storage::disk('public')->exists($user->profile_photo)) {
+            Storage::disk('public')->delete($user->profile_photo);
+        }
+        $user->profile_photo = null;
+    }
+
+    // 🔹 Upload d'une nouvelle photo
+    if ($request->hasFile('profile_photo')) {
+        // Supprimer l'ancienne
+        if ($user->profile_photo && Storage::disk('public')->exists($user->profile_photo)) {
+            Storage::disk('public')->delete($user->profile_photo);
+        }
+
+        $path = $request->file('profile_photo')->store('profile_photos', 'public');
+        $user->profile_photo = $path;
+    }
+
+    $user->save();
+
+    return new UserResource($user->load('department'));
+}
+
 
     // Supprimer un utilisateur
     public function destroy($id)
@@ -166,7 +181,40 @@ class UserController extends Controller
 
         return response()->json(['message' => 'User deleted successfully']);
     }
+public function export()
+{
+    $fileName = 'users_export_' . now()->format('Y-m-d') . '.csv';
+    $users = User::all(['id', 'name', 'email', 'role', 'phone_number', 'department_id', 'created_at']);
 
+    $headers = [
+        'Content-Type' => 'text/csv',
+        'Content-Disposition' => "attachment; filename=\"$fileName\"",
+    ];
+
+    $callback = function() use ($users) {
+        $file = fopen('php://output', 'w');
+
+        // En-têtes CSV
+        fputcsv($file, ['ID', 'Name', 'Email', 'Role', 'Phone', 'Department ID', 'Created At']);
+
+        // Contenu CSV
+        foreach ($users as $user) {
+            fputcsv($file, [
+                $user->id,
+                $user->name,
+                $user->email,
+                $user->role,
+                $user->phone_number,
+                $user->department_id,
+                $user->created_at,
+            ]);
+        }
+
+        fclose($file);
+    };
+
+    return Response::stream($callback, 200, $headers);
+}
     // Retourne l'utilisateur connecté (déjà présent)
     public function me(Request $request)
     {
