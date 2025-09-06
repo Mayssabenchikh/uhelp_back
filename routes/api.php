@@ -25,6 +25,8 @@ use App\Http\Controllers\GroupController;
 use App\Http\Controllers\Admin\InvoiceController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\TrashedTicketController;
+use App\Http\Controllers\QuickResponseController;
+use App\Http\Controllers\GeminiController;
 
 /*
 |--------------------------------------------------------------------------
@@ -95,12 +97,36 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('logout', [AuthController::class, 'logout']);
     Route::get('/me', [UserController::class, 'me']);
 
-  
-    // Users (listing, CRUD, export)
+    // Quick responses resource
+    Route::apiResource('quick-responses', QuickResponseController::class);
+
+    // --- Chat routes (standardisées) ---
+    // Liste des conversations (GET /api/conversations)
+    Route::get('/conversations', [ChatController::class, 'index']);
+Route::get('/conversations/{id}/details', [ChatController::class, 'conversationDetails']);
+
+    // Création d'une conversation (POST /api/conversations)
+    Route::post('/conversations', [ChatController::class, 'createConversation']);
+
+    // Récupérer messages d'une conversation (GET /api/conversations/{conversation}/messages)
+    // (point vers getMessages pour compatibilité)
+    Route::get('/conversations/{conversation}/messages', [ChatController::class, 'getMessages']);
+
+    // Ancienne/alternative route (compatibilité) : /api/chat/{conversation}/messages
+    Route::get('/chat/{conversation}/messages', [ChatController::class, 'getMessages']);
+
+    // Envoi d'un message — endpoint central (POST /api/chat/send)
+    Route::post('/chat/send', [ChatController::class, 'send']);
+
+    // endpoints pour les suggestions/faq/traduction via Gemini
+    Route::post('gemini/suggest', [GeminiController::class, 'suggest']);
+    Route::post('gemini/translate', [GeminiController::class, 'translate']);
+    Route::post('gemini/faq', [GeminiController::class, 'faqFromTicket']);
+
+    // Users & exports
+    Route::get('users/ticket-counts', [TicketController::class, 'ticketCounts']);
     Route::get('/users/export', [UserController::class, 'export']);
-
     Route::apiResource('users', UserController::class);
-
 
     // Agents
     Route::get('/agents', [AgentController::class, 'index']);
@@ -145,12 +171,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::apiResource('subscriptions', SubscriptionController::class);
     Route::apiResource('payments', PaymentController::class);
 
-    // Chat / Attachments
-    Route::post('/conversations', [ChatController::class, 'createConversation']);
-    Route::get('/chat/{conversation}/messages', [ChatController::class, 'getMessages']);
-    Route::post('chat/send', [ChatController::class, 'send']);
-    Route::get('conversations/{conversationId}/messages', [ChatController::class, 'messages']);
-
+    // Attachments
     Route::post('attachments', [AttachmentController::class, 'store']);
     Route::delete('attachments/{attachment}', [AttachmentController::class, 'destroy']);
     Route::get('attachments/{attachment}/show', [AttachmentController::class, 'show']);
@@ -163,8 +184,6 @@ Route::middleware('auth:sanctum')->group(function () {
     // Dashboard & helpers
     Route::get('/dashboard', [DashboardController::class, 'index']);
     Route::post('/tickets/{ticket}/assign', [TicketController::class, 'assignAgent']);
-
-    // Me
 });
 
 /*

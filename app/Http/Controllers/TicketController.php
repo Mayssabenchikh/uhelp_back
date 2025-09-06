@@ -326,4 +326,62 @@ class TicketController extends Controller
             return response()->json(['message' => 'Erreur lors de l\'assignation', 'error' => $e->getMessage()], 500);
         }
     }
+     public function ticketCounts(Request $request)
+    {
+        $idsParam = (string) $request->query('ids', '');
+        $resolvedStatus = $request->query('resolved_status', 'closed');
+
+        // parse ids safely
+        $ids = array_values(array_filter(array_map('intval', array_map('trim', explode(',', $idsParam))), function ($v) {
+            return $v > 0;
+        }));
+
+        if (empty($ids)) {
+            return response()->json(['data' => []]);
+        }
+
+        // --- Counts when user is client (client_id) ---
+        $clientCounts = DB::table('tickets')
+            ->selectRaw(
+                'client_id as user_id, COUNT(*) as client_created, SUM(CASE WHEN `statut` = ? THEN 1 ELSE 0 END) as client_resolved',
+                [$resolvedStatus]
+            )
+            ->whereIn('client_id', $ids)
+            ->whereNull('deleted_at') // ignore soft-deleted tickets
+            ->groupBy('client_id')
+            ->get()
+            ->keyBy('user_id'); // collection keyed by user_id
+
+        // --- Counts when user is agent (agentassigne_id) ---
+        $agentCounts = DB::table('tickets')
+            ->selectRaw(
+                'agentassigne_id as user_id, COUNT(*) as agent_assigned, SUM(CASE WHEN `statut` = ? THEN 1 ELSE 0 END) as agent_resolved',
+                [$resolvedStatus]
+            )
+            ->whereIn('agentassigne_id', $ids)
+            ->whereNotNull('agentassigne_id') // skip null assignments
+            ->whereNull('deleted_at')
+            ->groupBy('agentassigne_id')
+            ->get()
+            ->keyBy('user_id');
+
+        $result = [];
+
+        foreach ($ids as $id) {
+            $c = $clientCounts->get($id); // may be null
+            $a = $agentCounts->get($id);
+
+            $result[] = [
+                'user_id' => $id,
+                'client_created' => isset($c->client_created) ? (int)$c->client_created : 0,
+                'client_resolved' => isset($c->client_resolved) ? (int)$c->client_resolved : 0,
+                'agent_assigned' => isset($a->agent_assigned) ? (int)$a->agent_assigned : 0,
+                'agent_resolved' => isset($a->agent_resolved) ? (int)$a->agent_resolved : 0,
+            ];
+        }
+
+        return response()->json(['data' => $result]);
+    }
+
+
 }

@@ -40,6 +40,11 @@ return [
         'wallet_id' => env('KONNECT_WALLET_ID'),
         'callback_url' => env('KONNECT_CALLBACK_URL'),
     ],
-
+'gemini' => [
+        // Lire depuis .env — laisse des valeurs par défaut vides pour éviter les warnings
+        'key'   => env('GEMINI_API_KEY', ''),
+        'url'   => env('GEMINI_API_URL', 'https://generativelanguage.googleapis.com/v1beta2'),
+        'model' => env('GEMINI_MODEL', 'models/text-bison-001'),
+    ],
 
 ];

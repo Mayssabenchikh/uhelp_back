@@ -9,19 +9,83 @@ use App\Models\Conversation;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use App\Models\Group;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 
 class ChatController extends Controller
 {
-   public function send(Request $request)
+     public function index(Request $request)
+    {
+        try {
+            $perPage = max(1, (int)$request->get('per_page', 20));
+            $status = $request->get('status', null);
+            $search = $request->get('search', null);
+
+            // Si la table n'existe pas, retourner un payload vide pour éviter 500
+            if (! Schema::hasTable('conversations')) {
+                Log::warning('ChatController@index: table conversations not found');
+                return response()->json([
+                    'data' => [],
+                    'meta' => [
+                        'total' => 0,
+                        'per_page' => $perPage,
+                        'current_page' => 1,
+                        'last_page' => 0
+                    ],
+                    'warning' => 'Table conversations introuvable (dev)'
+                ], 200);
+            }
+
+            $qb = DB::table('conversations')->select('id', 'title', 'status', 'priority', 'updated_at', 'created_at');
+
+            if ($status) {
+                $qb->where('status', $status);
+            }
+
+            if ($search !== null && $search !== '') {
+                $qb->where(function($q) use ($search) {
+                    $q->where('title', 'like', '%'.$search.'%')
+                      ->orWhere('id', (int)$search);
+                });
+            }
+
+            $qb->orderBy('updated_at', 'desc');
+
+            $page = max(1, (int) $request->get('page', 1));
+            $items = $qb->forPage($page, $perPage)->get();
+            // Recalc total with same filters
+            $countQ = DB::table('conversations');
+            if ($status) $countQ->where('status', $status);
+            if ($search !== null && $search !== '') $countQ->where('title', 'like', '%'.$search.'%');
+            $total = (int) $countQ->count();
+
+            $result = [
+                'data' => $items,
+                'meta' => [
+                    'total' => $total,
+                    'per_page' => $perPage,
+                    'current_page' => $page,
+                    'last_page' => (int) ceil($total / max(1, $perPage))
+                ]
+            ];
+
+            return response()->json($result, 200);
+        } catch (\Throwable $e) {
+            Log::error('ChatController@index exception: '.$e->getMessage(), ['trace' => $e->getTraceAsString()]);
+            // Ne pas exposer la stack en prod — mais en dev on renvoie un message clair
+            $message = env('APP_DEBUG', false) ? $e->getMessage() : 'Erreur serveur';
+            return response()->json(['message' => $message], 500);
+        }
+    }
+  public function send(Request $request)
 {
     $request->validate([
         'conversation_id' => 'required|integer|exists:conversations,id',
         'body' => 'nullable|string',
         'attachment_ids' => 'nullable|array',
         'attachment_ids.*' => 'integer|exists:attachments,id',
-        // accept both 'files' and 'attachments' keys in form-data to be flexible with Postman
         'files' => 'nullable',
-        'attachments' => 'nullable',
     ]);
 
     $user = Auth::user();
@@ -31,83 +95,60 @@ class ChatController extends Controller
         return response()->json(['message' => 'Unauthorized to post in this conversation.'], 403);
     }
 
-    $message = ChatMessage::create([
-        'conversation_id' => $conversation->id,
-        'user_id' => $user->id,
-        'body' => $request->body,
-        'meta' => $request->input('meta', null),
-    ]);
+    try {
+        \DB::beginTransaction();
 
-    // 1) Claim attachment_ids (pré-uploadés via AttachmentController)
-    if ($request->filled('attachment_ids')) {
-        \App\Models\Attachment::whereIn('id', $request->attachment_ids)
-            ->whereNull('attachable_id')
-            ->update([
-                'attachable_type' => ChatMessage::class,
-                'attachable_id' => $message->id,
-            ]);
-    }
+        $message = ChatMessage::create([
+            'conversation_id' => $conversation->id,
+            'user_id' => $user->id,
+            'body' => $request->body,
+            'meta' => $request->input('meta', null),
+        ]);
 
-    // Helper pour traiter un ou plusieurs fichiers envoyés dans la même requête
-    $processUploadFiles = function ($files) use ($message, $user) {
-        if (! $files) return;
-        // si $files est un UploadedFile unique, le transformer en array
-        if (! is_array($files) && ! $files instanceof \Illuminate\Support\Collection) {
-            $files = [$files];
+        // claim pre-uploaded attachments
+        if ($request->filled('attachment_ids')) {
+            \App\Models\Attachment::whereIn('id', $request->attachment_ids)
+                ->whereNull('attachable_id')
+                ->update([
+                    'attachable_type' => ChatMessage::class,
+                    'attachable_id' => $message->id,
+                ]);
         }
-        foreach ($files as $file) {
-            if (! $file || ! $file->isValid()) continue;
-            $disk = 'public';
-            $folder = 'attachments/' . date('Y/m/d');
-            $storedName = \Illuminate\Support\Str::random(36) . '.' . $file->getClientOriginalExtension();
-            $path = $file->storeAs($folder, $storedName, $disk);
 
-            $message->attachments()->create([
-                'user_id' => $user->id,
-                'disk' => $disk,
-                'path' => $path,
-                'filename' => $file->getClientOriginalName(),
-                'mime' => $file->getClientMimeType(),
-                'size' => $file->getSize(),
-            ]);
+        // process uploaded files inline (same implementation que toi)
+        if ($request->hasFile('files')) {
+            foreach ($request->file('files') as $file) {
+                if (!$file->isValid()) continue;
+                $disk = 'public';
+                $folder = 'attachments/' . date('Y/m/d');
+                $storedName = \Illuminate\Support\Str::random(36) . '.' . $file->getClientOriginalExtension();
+                $path = $file->storeAs($folder, $storedName, $disk);
+
+                $message->attachments()->create([
+                    'user_id' => $user->id,
+                    'disk' => $disk,
+                    'path' => $path,
+                    'filename' => $file->getClientOriginalName(),
+                    'mime' => $file->getClientMimeType(),
+                    'size' => $file->getSize(),
+                ]);
+            }
         }
-    };
 
-    // 2) Fichiers sous la clé 'files' (form-data: files[] multiple)
-    if ($request->hasFile('files')) {
-        $processUploadFiles($request->file('files'));
+        \DB::commit();
+
+        // recharger relations
+        $message->load('attachments','user');
+
+        // broadcast event (utilise l'Event ChatMessageSent)
+        event(new \App\Events\ChatMessageSent($message));
+
+        return response()->json(['ok' => true, 'message' => $message], 201);
+    } catch (\Throwable $e) {
+        \DB::rollBack();
+        \Log::error('Chat send error: ' . $e->getMessage(), ['trace' => $e->getTraceAsString()]);
+        return response()->json(['message' => 'Erreur lors de l\'envoi du message.','error'=>$e->getMessage()], 500);
     }
-
-    // 3) Fichiers sous la clé 'attachments' (compatibilité front/back)
-    if ($request->hasFile('attachments')) {
-        $processUploadFiles($request->file('attachments'));
-    }
-
-    // recharger les attachments et user pour response
-    $message->load('attachments','user');
-
-    $payload = [
-        'id' => $message->id,
-        'conversation_id' => $message->conversation_id,
-        'user_id' => $message->user_id,
-        'body' => $message->body,
-        'meta' => $message->meta,
-        'created_at' => $message->created_at->toDateTimeString(),
-        'attachments' => $message->attachments->map(function ($a) {
-            return [
-                'id' => $a->id,
-                'url' => $a->url(),
-                'filename' => $a->filename,
-                'mime' => $a->mime,
-                'size' => $a->size,
-            ];
-        })->toArray(),
-    ];
-
-    // broadcast (ton event ChatMessageSent acceptant un array payload)
-    broadcast(new ChatMessageSent($payload))->toOthers();
-
-    return response()->json(['ok' => true, 'message' => $payload], 201);
 }
 
 
@@ -145,15 +186,52 @@ public function createConversation(Request $request)
     ], 201);
 }
     public function getMessages($conversationId)
+    {
+        // Garde ton implé existante ; je la laisse telle quelle mais la reprends pour sûreté.
+        $messages = ChatMessage::where('conversation_id', $conversationId)
+            ->with('user')
+            ->orderBy('created_at')
+            ->get();
+
+        return response()->json($messages);
+    }
+
+public function conversationDetails($id)
 {
-    $messages = ChatMessage::where('conversation_id', $conversationId)
-        ->with('user') // si relation user définie
-        ->orderBy('created_at')
-        ->get();
+    $conversation = Conversation::with(['participants', 'messages'])->findOrFail($id);
 
-    return response()->json($messages);
+    // Pour simplifier, on prend le premier participant qui n'est pas l'agent
+    $customer = $conversation->participants()->where('role', '!=', 'agent')->first();
+
+    $totalChats = $conversation->messages()->count();
+    $satisfaction = $conversation->messages()->avg('rating') ?? 0; // si vous avez un champ rating
+    $joinedAt = optional($customer)->created_at?->format('Y-m-d') ?? null;
+
+    return response()->json([
+        'customer' => [
+            'id' => $customer->id ?? null,
+            'name' => $customer->name ?? 'Anonymous',
+            'email' => $customer->email ?? '',
+            'avatar' => $customer->avatar ?? null,
+            'location' => $customer->location ?? '', // si champ disponible
+            'joined_at' => $joinedAt,
+        ],
+        'chat_statistics' => [
+            'total_chats' => $totalChats,
+            'satisfaction' => round($satisfaction, 1),
+        ],
+        'actions' => [
+            'can_create_ticket' => true,
+            'can_view_history' => true,
+            'can_report_issue' => true,
+        ],
+        'conversation' => [
+            'id' => $conversation->id,
+            'title' => $conversation->title,
+            'status' => $conversation->status,
+            'priority' => $conversation->priority,
+        ]
+    ]);
 }
-
-
 
 }
