@@ -6,267 +6,378 @@ use Illuminate\Http\Request;
 use App\Models\Ticket;
 use App\Models\User;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Carbon\Carbon;
 
 class ReportsController extends Controller
 {
     /**
-     * Get comprehensive analytics data
+     * Retourne les données complètes du reporting (uniquement depuis la base de données)
      */
     public function index(Request $request)
     {
-        $dateRange = $request->get('date_range', '30days');
-        $startDate = $this->getStartDate($dateRange);
-        
-        return response()->json([
-            'overview' => $this->getOverviewMetrics($startDate),
-            'ticket_volume' => $this->getTicketVolumeData($startDate),
-            'status_distribution' => $this->getStatusDistribution($startDate),
-            'priority_distribution' => $this->getPriorityDistribution($startDate),
-            'response_time' => $this->getResponseTimeData($startDate),
-            'agent_performance' => $this->getAgentPerformance($startDate),
-            'satisfaction' => $this->getSatisfactionMetrics($startDate),
-        ]);
+        try {
+            $dateRange = $request->get('date_range', '30days');
+            $startDate = $this->getStartDate($dateRange);
+
+            return response()->json([
+                'overview' => $this->getOverviewMetrics($startDate),
+                'ticket_volume' => $this->getTicketVolumeData($startDate),
+                'status_distribution' => $this->getStatusDistribution($startDate),
+                'priority_distribution' => $this->getPriorityDistribution($startDate),
+                'response_time' => $this->getResponseTimeData($startDate),
+                'agent_performance' => $this->getAgentPerformance($startDate),
+                'satisfaction' => $this->getSatisfactionMetrics($startDate),
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Reports index error: ' . $e->getMessage());
+            Log::error($e->getTraceAsString());
+
+            return response()->json([
+                'error' => 'Failed to generate reports',
+                'message' => $e->getMessage()
+            ], 500);
+        }
     }
 
     /**
-     * Get overview metrics for dashboard cards
+     * Métriques pour les cartes du dashboard (calculées uniquement depuis la DB)
      */
-    public function getOverviewMetrics($startDate = null)
+    public function getOverviewMetrics($startDate)
     {
-        if (!$startDate) {
-            $startDate = $this->getStartDate('30days');
-        }
+        try {
+            $daysDiff = Carbon::now()->diffInDays($startDate);
+            $previousPeriodStart = Carbon::parse($startDate)->subDays($daysDiff);
 
-        $previousPeriodStart = Carbon::parse($startDate)->subDays(
-            Carbon::now()->diffInDays($startDate)
-        );
+            // Total tickets période actuelle
+            $totalTickets = Ticket::where('created_at', '>=', $startDate)->count();
 
-        // Current period metrics
-        $totalTickets = Ticket::where('created_at', '>=', $startDate)->count();
-        $resolvedTickets = Ticket::where('created_at', '>=', $startDate)
-                                ->where('statut', 'closed')
-                                ->count();
-
-        $avgResponseTime = Ticket::where('created_at', '>=', $startDate)
-                                ->whereNotNull('agentassigne_id')
-                                ->avg(DB::raw('TIMESTAMPDIFF(HOUR, created_at, updated_at)'));
-
-        // Previous period for comparison
-        $prevTotalTickets = Ticket::whereBetween('created_at', [$previousPeriodStart, $startDate])->count();
-        $prevResolvedTickets = Ticket::whereBetween('created_at', [$previousPeriodStart, $startDate])
-                                    ->where('statut', 'closed')
+            // Tickets résolus (utilise les valeurs de la colonne 'statut')
+            $resolvedTickets = Ticket::where('created_at', '>=', $startDate)
+                                    ->whereIn(DB::raw('LOWER(statut)'), ['closed', 'resolved', 'fermé', 'ferme'])
                                     ->count();
 
-        $prevAvgResponseTime = Ticket::whereBetween('created_at', [$previousPeriodStart, $startDate])
-                                    ->whereNotNull('agentassigne_id')
-                                    ->avg(DB::raw('TIMESTAMPDIFF(HOUR, created_at, updated_at)'));
+            // Période précédente
+            $prevTotalTickets = Ticket::whereBetween('created_at', [$previousPeriodStart, $startDate])->count();
+            $prevResolvedTickets = Ticket::whereBetween('created_at', [$previousPeriodStart, $startDate])
+                                        ->whereIn(DB::raw('LOWER(statut)'), ['closed', 'resolved', 'fermé', 'ferme'])
+                                        ->count();
 
-        $resolutionRate = $totalTickets > 0 ? round(($resolvedTickets / $totalTickets) * 100, 1) : 0;
-        $prevResolutionRate = $prevTotalTickets > 0 ? round(($prevResolvedTickets / $prevTotalTickets) * 100, 1) : 0;
+            $resolutionRate = $totalTickets > 0 ? round(($resolvedTickets / $totalTickets) * 100, 1) : 0;
+            $prevResolutionRate = $prevTotalTickets > 0 ? round(($prevResolvedTickets / $prevTotalTickets) * 100, 1) : 0;
 
-        return [
-            'total_tickets' => [
-                'value' => $totalTickets,
-                'change' => $this->calculatePercentageChange($totalTickets, $prevTotalTickets),
-                'trend' => $totalTickets >= $prevTotalTickets ? 'up' : 'down'
-            ],
-            'resolution_rate' => [
-                'value' => $resolutionRate,
-                'change' => $this->calculatePercentageChange($resolutionRate, $prevResolutionRate),
-                'trend' => $resolutionRate >= $prevResolutionRate ? 'up' : 'down'
-            ],
-            'avg_response_time' => [
-                'value' => round($avgResponseTime ?? 0, 1),
-                'change' => $this->calculatePercentageChange($avgResponseTime ?? 0, $prevAvgResponseTime ?? 0),
-                'trend' => ($avgResponseTime ?? 0) <= ($prevAvgResponseTime ?? 0) ? 'up' : 'down' // Lower is better for response time
-            ],
-            'customer_satisfaction' => [
-                'value' => 4.7, // Mock data - you can implement actual satisfaction tracking
-                'change' => 4.3,
-                'trend' => 'up'
-            ]
-        ];
-    }
+            // Temps moyen de résolution en heures (created_at -> updated_at quand updated_at > created_at)
+            $avgResponseTime = Ticket::where('created_at', '>=', $startDate)
+                ->whereNotNull('updated_at')
+                ->whereColumn('updated_at', '>', 'created_at')
+                ->selectRaw('AVG(TIMESTAMPDIFF(HOUR, created_at, updated_at)) as avg_time')
+                ->value('avg_time');
 
-    /**
-     * Get ticket volume trend data
-     */
-    public function getTicketVolumeData($startDate = null)
-    {
-        if (!$startDate) {
-            $startDate = $this->getStartDate('30days');
-        }
+            $avgResponseTime = $avgResponseTime !== null ? round($avgResponseTime, 1) : null;
 
-        return Ticket::select(
-                DB::raw('DATE_FORMAT(created_at, "%b") as month'),
-                DB::raw('COUNT(*) as tickets'),
-                DB::raw('SUM(CASE WHEN statut = "closed" THEN 1 ELSE 0 END) as resolved')
-            )
-            ->where('created_at', '>=', $startDate)
-            ->groupBy(DB::raw('YEAR(created_at), MONTH(created_at)'))
-            ->orderBy('created_at')
-            ->get();
-    }
+            // Customer satisfaction si colonne 'satisfaction' existe dans tickets
+            $hasSatisfactionColumn = \Schema::hasColumn((new Ticket)->getTable(), 'satisfaction');
+            $customerSatisfaction = null;
+            if ($hasSatisfactionColumn) {
+                $customerSatisfaction = Ticket::where('created_at', '>=', $startDate)
+                                            ->whereNotNull('satisfaction')
+                                            ->selectRaw('AVG(satisfaction) as avg_satisfaction')
+                                            ->value('avg_satisfaction');
 
-    /**
-     * Get status distribution
-     */
-    public function getStatusDistribution($startDate = null)
-    {
-        if (!$startDate) {
-            $startDate = $this->getStartDate('30days');
-        }
+                $customerSatisfaction = $customerSatisfaction !== null ? round($customerSatisfaction, 2) : null;
+            }
 
-        $statuses = Ticket::select('statut', DB::raw('COUNT(*) as count'))
-                         ->where('created_at', '>=', $startDate)
-                         ->groupBy('statut')
-                         ->get();
-
-        $colors = [
-            'closed' => '#22c55e',
-            'open' => '#f97316',
-            'in_progress' => '#3b82f6',
-            'pending' => '#eab308',
-            'resolved' => '#22c55e'
-        ];
-
-        return $statuses->map(function($item) use ($colors) {
             return [
-                'name' => ucfirst(str_replace('_', ' ', $item->statut)),
-                'value' => $item->count,
-                'color' => $colors[$item->statut] ?? '#6b7280'
+                'total_tickets' => [
+                    'value' => $totalTickets,
+                    'change' => $this->calculatePercentageChange($totalTickets, $prevTotalTickets),
+                    'trend' => $totalTickets >= $prevTotalTickets ? 'up' : 'down'
+                ],
+                'resolution_rate' => [
+                    'value' => $resolutionRate,
+                    'change' => $this->calculatePercentageChange($resolutionRate, $prevResolutionRate),
+                    'trend' => $resolutionRate >= $prevResolutionRate ? 'up' : 'down'
+                ],
+                'avg_response_time' => [
+                    'value' => $avgResponseTime, // null si non calculable
+                    'change' => null,
+                    'trend' => null
+                ],
+                'customer_satisfaction' => [
+                    'value' => $customerSatisfaction, // null si colonne absente
+                    'change' => null,
+                    'trend' => null
+                ]
             ];
-        });
+        } catch (\Exception $e) {
+            Log::error('Overview metrics error: ' . $e->getMessage());
+            return [
+                'total_tickets' => ['value' => 0, 'change' => 0, 'trend' => 'down'],
+                'resolution_rate' => ['value' => 0, 'change' => 0, 'trend' => 'down'],
+                'avg_response_time' => ['value' => null, 'change' => null, 'trend' => null],
+                'customer_satisfaction' => ['value' => null, 'change' => null, 'trend' => null]
+            ];
+        }
     }
 
     /**
-     * Get priority distribution
+     * Volume de tickets par mois (depuis la DB)
      */
-    public function getPriorityDistribution($startDate = null)
+    public function getTicketVolumeData($startDate)
     {
-        if (!$startDate) {
-            $startDate = $this->getStartDate('30days');
-        }
+        try {
+            $results = Ticket::select(
+                    DB::raw('DATE_FORMAT(created_at, "%b") as month'),
+                    DB::raw('COUNT(*) as tickets'),
+                    DB::raw('SUM(CASE WHEN LOWER(statut) IN ("closed", "resolved", "fermé", "ferme") THEN 1 ELSE 0 END) as resolved')
+                )
+                ->where('created_at', '>=', $startDate)
+                ->groupBy(DB::raw('DATE_FORMAT(created_at, "%Y-%m")'))
+                ->orderBy('created_at')
+                ->get();
 
-        return Ticket::select('priorite as priority', DB::raw('COUNT(*) as count'))
-                    ->where('created_at', '>=', $startDate)
-                    ->whereNotNull('priorite')
-                    ->groupBy('priorite')
-                    ->orderBy('count', 'desc')
-                    ->get()
-                    ->map(function($item) {
-                        return [
-                            'priority' => ucfirst($item->priority),
-                            'count' => $item->count
-                        ];
-                    });
-    }
-
-    /**
-     * Get response time trend data
-     */
-    public function getResponseTimeData($startDate = null)
-    {
-        if (!$startDate) {
-            $startDate = $this->getStartDate('30days');
-        }
-
-        return Ticket::select(
-                DB::raw('WEEK(created_at) as week_num'),
-                DB::raw('CONCAT("Week ", WEEK(created_at) - WEEK(?) + 1) as week'),
-                DB::raw('AVG(TIMESTAMPDIFF(HOUR, created_at, updated_at)) as avgResponse')
-            )
-            ->where('created_at', '>=', $startDate)
-            ->whereNotNull('agentassigne_id')
-            ->groupBy(DB::raw('WEEK(created_at)'))
-            ->orderBy('week_num')
-            ->get()
-            ->map(function($item) {
+            return $results->map(function($item) {
                 return [
-                    'week' => $item->week,
-                    'avgResponse' => round($item->avgResponse, 1)
+                    'month' => $item->month,
+                    'tickets' => (int)$item->tickets,
+                    'resolved' => (int)$item->resolved
                 ];
-            });
-    }
-
-    /**
-     * Get agent performance data
-     */
-    public function getAgentPerformance($startDate = null)
-    {
-        if (!$startDate) {
-            $startDate = $this->getStartDate('30days');
+            })->toArray();
+        } catch (\Exception $e) {
+            Log::error('Ticket volume error: ' . $e->getMessage());
+            return [];
         }
-
-        return User::where('role', 'agent')
-                  ->withCount([
-                      'assignedTickets as solved' => function($query) use ($startDate) {
-                          $query->where('created_at', '>=', $startDate)
-                                ->where('statut', 'closed');
-                      }
-                  ])
-                  ->having('solved', '>', 0)
-                  ->orderBy('solved', 'desc')
-                  ->get()
-                  ->map(function($agent) {
-                      return [
-                          'agent' => strtolower($agent->name),
-                          'solved' => $agent->solved,
-                          'satisfaction' => round(4.5 + (rand(-3, 5) / 10), 1) // Mock satisfaction score
-                      ];
-                  });
     }
 
     /**
-     * Get satisfaction metrics
+     * Répartition par statut (depuis la DB)
      */
-    public function getSatisfactionMetrics($startDate = null)
+    public function getStatusDistribution($startDate)
     {
-        // Mock data - implement actual satisfaction tracking based on your needs
-        return [
-            'overall_rating' => 4.7,
-            'response_rate' => 92,
-            'resolution_rate' => 87,
-            'trends' => [
-                'overall_rating' => 0.2,
-                'response_rate' => 5,
-                'resolution_rate' => 3
-            ]
-        ];
+        try {
+            $statuses = Ticket::select('statut', DB::raw('COUNT(*) as count'))
+                             ->where('created_at', '>=', $startDate)
+                             ->whereNotNull('statut')
+                             ->groupBy('statut')
+                             ->get();
+
+            $colors = [
+                'closed' => '#22c55e',
+                'fermé' => '#22c55e',
+                'resolved' => '#22c55e',
+                'open' => '#f97316',
+                'ouvert' => '#f97316',
+                'in_progress' => '#3b82f6',
+                'en_cours' => '#3b82f6',
+                'pending' => '#eab308',
+                'en_attente' => '#eab308'
+            ];
+
+            return $statuses->map(function($item) use ($colors) {
+                $key = strtolower($item->statut);
+                return [
+                    'name' => ucfirst(str_replace('_', ' ', $item->statut)),
+                    'value' => (int)$item->count,
+                    'color' => $colors[$key] ?? '#6b7280'
+                ];
+            })->values()->toArray();
+        } catch (\Exception $e) {
+            Log::error('Status distribution error: ' . $e->getMessage());
+            return [];
+        }
     }
 
     /**
-     * Export reports data
+     * Répartition par priorité (depuis la DB)
+     */
+    public function getPriorityDistribution($startDate)
+    {
+        try {
+            $results = Ticket::select('priorite as priority', DB::raw('COUNT(*) as count'))
+                        ->where('created_at', '>=', $startDate)
+                        ->whereNotNull('priorite')
+                        ->where('priorite', '!=', '')
+                        ->groupBy('priorite')
+                        ->orderByDesc('count')
+                        ->get();
+
+            return $results->map(function($item) {
+                return [
+                    'priority' => ucfirst($item->priority),
+                    'count' => (int)$item->count
+                ];
+            })->toArray();
+        } catch (\Exception $e) {
+            Log::error('Priority distribution error: ' . $e->getMessage());
+            return [];
+        }
+    }
+
+    /**
+     * Temps moyen de réponse par semaine (calcul simple depuis la DB)
+     */
+    public function getResponseTimeData($startDate)
+    {
+        try {
+            // Exemple: moyenne hebdomadaire des temps de résolution (heures)
+            $results = Ticket::where('created_at', '>=', $startDate)
+                        ->whereNotNull('updated_at')
+                        ->whereColumn('updated_at', '>', 'created_at')
+                        ->select(
+                            DB::raw('WEEK(created_at, 1) as week_number'),
+                            DB::raw('AVG(TIMESTAMPDIFF(HOUR, created_at, updated_at)) as avgResponse')
+                        )
+                        ->groupBy('week_number')
+                        ->orderBy('week_number')
+                        ->get();
+
+            return $results->map(function($r) {
+                return [
+                    'week' => 'Week ' . $r->week_number,
+                    'avgResponse' => round($r->avgResponse, 2)
+                ];
+            })->toArray();
+        } catch (\Exception $e) {
+            Log::error('Response time error: ' . $e->getMessage());
+            return [];
+        }
+    }
+
+    /**
+     * Performance des agents (calculée depuis la DB)
+     */
+    public function getAgentPerformance($startDate)
+    {
+        try {
+            // Suppose que la table tickets contient agent_id référant aux users
+            $agents = User::where('role', 'agent')->get();
+
+            if ($agents->isEmpty()) {
+                return [];
+            }
+
+            $data = $agents->map(function($agent) use ($startDate) {
+                $solved = Ticket::where('agent_id', $agent->id)
+                                ->where('created_at', '>=', $startDate)
+                                ->whereIn(DB::raw('LOWER(statut)'), ['closed', 'resolved', 'fermé', 'ferme'])
+                                ->count();
+
+                $hasSatisfactionColumn = \Schema::hasColumn((new Ticket)->getTable(), 'satisfaction');
+                $satisfaction = null;
+                if ($hasSatisfactionColumn) {
+                    $satisfaction = Ticket::where('agent_id', $agent->id)
+                                            ->where('created_at', '>=', $startDate)
+                                            ->whereNotNull('satisfaction')
+                                            ->selectRaw('AVG(satisfaction) as avg_satisfaction')
+                                            ->value('avg_satisfaction');
+
+                    $satisfaction = $satisfaction !== null ? round($satisfaction, 2) : null;
+                }
+
+                return [
+                    'agent' => strtolower($agent->name),
+                    'solved' => (int)$solved,
+                    'satisfaction' => $satisfaction
+                ];
+            })->sortByDesc('solved')->take(5)->values()->toArray();
+
+            return $data;
+        } catch (\Exception $e) {
+            Log::error('Agent performance error: ' . $e->getMessage());
+            return [];
+        }
+    }
+
+    /**
+     * Métriques de satisfaction (depuis la DB si disponible)
+     */
+    public function getSatisfactionMetrics($startDate)
+    {
+        try {
+            $hasSatisfactionColumn = \Schema::hasColumn((new Ticket)->getTable(), 'satisfaction');
+            if (! $hasSatisfactionColumn) {
+                return [
+                    'overall_rating' => null,
+                    'response_rate' => null,
+                    'resolution_rate' => null,
+                    'trends' => []
+                ];
+            }
+
+            $overall = Ticket::where('created_at', '>=', $startDate)
+                        ->whereNotNull('satisfaction')
+                        ->selectRaw('AVG(satisfaction) as overall_rating')
+                        ->value('overall_rating');
+
+            $responseRate = Ticket::where('created_at', '>=', $startDate)
+                        ->whereNotNull('updated_at')
+                        ->whereColumn('updated_at', '>', 'created_at')
+                        ->count();
+
+            $total = Ticket::where('created_at', '>=', $startDate)->count();
+
+            $responseRatePercent = $total > 0 ? round(($responseRate / $total) * 100, 1) : null;
+
+            $resolved = Ticket::where('created_at', '>=', $startDate)
+                        ->whereIn(DB::raw('LOWER(statut)'), ['closed', 'resolved', 'fermé', 'ferme'])
+                        ->count();
+
+            $resolutionRatePercent = $total > 0 ? round(($resolved / $total) * 100, 1) : null;
+
+            return [
+                'overall_rating' => $overall !== null ? round($overall, 2) : null,
+                'response_rate' => $responseRatePercent,
+                'resolution_rate' => $resolutionRatePercent,
+                'trends' => []
+            ];
+        } catch (\Exception $e) {
+            Log::error('Satisfaction metrics error: ' . $e->getMessage());
+            return [
+                'overall_rating' => null,
+                'response_rate' => null,
+                'resolution_rate' => null,
+                'trends' => []
+            ];
+        }
+    }
+
+    /**
+     * Export CSV ou JSON
      */
     public function export(Request $request)
     {
-        $dateRange = $request->get('date_range', '30days');
-        $format = $request->get('format', 'csv');
-        $startDate = $this->getStartDate($dateRange);
+        try {
+            $dateRange = $request->get('date_range', '30days');
+            $format = $request->get('format', 'csv');
+            $startDate = $this->getStartDate($dateRange);
 
-        $data = [
-            'overview' => $this->getOverviewMetrics($startDate),
-            'tickets' => Ticket::with(['client:id,name,email', 'agent:id,name,email'])
-                              ->where('created_at', '>=', $startDate)
-                              ->get(),
-            'agents' => $this->getAgentPerformance($startDate)
-        ];
+            $data = [
+                'overview' => $this->getOverviewMetrics($startDate),
+                'tickets' => Ticket::where('created_at', '>=', $startDate)->get(),
+                'agents' => $this->getAgentPerformance($startDate)
+            ];
 
-        if ($format === 'csv') {
-            return $this->exportToCsv($data);
+            if($format === 'csv') {
+                return $this->exportToCsv($data);
+            }
+
+            return response()->json($data);
+        } catch (\Exception $e) {
+            Log::error('Reports export error: ' . $e->getMessage());
+
+            return response()->json([
+                'error' => 'Failed to export reports',
+                'message' => $e->getMessage()
+            ], 500);
         }
-
-        return response()->json($data);
     }
 
     /**
-     * Export data to CSV format
+     * Export CSV
      */
     private function exportToCsv($data)
     {
         $fileName = 'reports_export_' . now()->format('Y-m-d') . '.csv';
-        
         $headers = [
             'Content-Type' => 'text/csv',
             'Content-Disposition' => "attachment; filename=\"$fileName\"",
@@ -274,22 +385,17 @@ class ReportsController extends Controller
 
         $callback = function() use ($data) {
             $file = fopen('php://output', 'w');
+            fputcsv($file, ['ID','Title','Status','Priority','Created At']);
 
-            // Export tickets data
-            fputcsv($file, ['ID', 'Title', 'Status', 'Priority', 'Client', 'Agent', 'Created At']);
-            
-            foreach ($data['tickets'] as $ticket) {
+            foreach($data['tickets'] as $ticket){
                 fputcsv($file, [
-                    $ticket->id,
-                    $ticket->titre,
-                    $ticket->statut,
-                    $ticket->priorite,
-                    $ticket->client?->name,
-                    $ticket->agent?->name,
-                    $ticket->created_at->format('Y-m-d H:i:s')
+                    $ticket->id ?? '',
+                    $ticket->titre ?? $ticket->title ?? '',
+                    $ticket->statut ?? $ticket->status ?? '',
+                    $ticket->priorite ?? $ticket->priority ?? '',
+                    $ticket->created_at ? $ticket->created_at->format('Y-m-d H:i:s') : ''
                 ]);
             }
-
             fclose($file);
         };
 
@@ -297,33 +403,27 @@ class ReportsController extends Controller
     }
 
     /**
-     * Calculate percentage change between two values
+     * Pourcentage de variation
      */
     private function calculatePercentageChange($current, $previous)
     {
-        if ($previous == 0) {
+        if($previous == 0) {
             return $current > 0 ? 100 : 0;
         }
-        
         return round((($current - $previous) / $previous) * 100, 1);
     }
 
     /**
-     * Get start date based on date range
+     * Début de la période
      */
     private function getStartDate($dateRange)
     {
-        switch ($dateRange) {
-            case '7days':
-                return Carbon::now()->subDays(7);
-            case '30days':
-                return Carbon::now()->subDays(30);
-            case '90days':
-                return Carbon::now()->subDays(90);
-            case '1year':
-                return Carbon::now()->subYear();
-            default:
-                return Carbon::now()->subDays(30);
-        }
+        return match($dateRange) {
+            '7days' => Carbon::now()->subDays(7),
+            '30days' => Carbon::now()->subDays(30),
+            '90days' => Carbon::now()->subDays(90),
+            '1year' => Carbon::now()->subYear(),
+            default => Carbon::now()->subDays(30),
+        };
     }
 }

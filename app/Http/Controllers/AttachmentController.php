@@ -36,7 +36,6 @@ class AttachmentController extends Controller
             'size' => $file->getSize(),
         ]);
 
-        // si front a fourni attachable info, on attache tout de suite (optionnel)
         if ($request->filled('attachable_type') && $request->filled('attachable_id')) {
             $map = [
                 'chat_message' => \App\Models\ChatMessage::class,
@@ -49,10 +48,17 @@ class AttachmentController extends Controller
             }
         }
 
+        // compute public url
+        try {
+            $url = Storage::disk($attachment->disk)->url($attachment->path);
+        } catch (\Throwable $e) {
+            $url = url('/storage/' . ltrim($attachment->path, '/'));
+        }
+
         return response()->json([
             'ok' => true,
             'attachment' => $attachment,
-            'url' => $attachment->url()
+            'url' => $url
         ], 201);
     }
 
@@ -66,29 +72,26 @@ class AttachmentController extends Controller
         return response()->json(['ok' => true], 200);
     }
     public function show(Attachment $attachment)
-{
-    // Autorisation (policy)
-    $this->authorize('view', $attachment);
+    {
+        $this->authorize('view', $attachment);
 
-    $disk = $attachment->disk ?: 'public';
-    $path = $attachment->path;
+        $disk = $attachment->disk ?: 'public';
+        $path = $attachment->path;
 
-    if (! Storage::disk($disk)->exists($path)) {
-        return response()->json(['message' => 'File not found'], 404);
-    }
+        if (! Storage::disk($disk)->exists($path)) {
+            return response()->json(['message' => 'File not found'], 404);
+        }
 
-    // Pour driver 'public' local : obtenir le chemin physique
-    if ($disk === 'public') {
-        $fullPath = Storage::disk($disk)->path($path);
-        return response()->file($fullPath, [
-            'Content-Type' => $attachment->mime,
-            'Content-Disposition' => 'inline; filename="'.basename($attachment->filename).'"'
+        if ($disk === 'public') {
+            $fullPath = Storage::disk($disk)->path($path);
+            return response()->file($fullPath, [
+                'Content-Type' => $attachment->mime,
+                'Content-Disposition' => 'inline; filename="'.basename($attachment->filename).'"'
+            ]);
+        }
+
+        return Storage::disk($disk)->response($path, $attachment->filename, [
+            'Content-Disposition' => 'inline; filename="'.$attachment->filename.'"'
         ]);
     }
-
-    // Pour S3 ou autres : stream le fichier (compatible)
-    return Storage::disk($disk)->response($path, $attachment->filename, [
-        'Content-Disposition' => 'inline; filename="'.$attachment->filename.'"'
-    ]);
-}
 }

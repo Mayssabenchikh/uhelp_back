@@ -27,6 +27,7 @@ use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\TrashedTicketController;
 use App\Http\Controllers\QuickResponseController;
 use App\Http\Controllers\GeminiController;
+use App\Http\Controllers\ReportsController;
 
 /*
 |--------------------------------------------------------------------------
@@ -100,25 +101,17 @@ Route::middleware('auth:sanctum')->group(function () {
     // Quick responses resource
     Route::apiResource('quick-responses', QuickResponseController::class);
 
-    // --- Chat routes (standardisées) ---
-    // Liste des conversations (GET /api/conversations)
+    // --- Chat routes ---
     Route::get('/conversations', [ChatController::class, 'index']);
-Route::get('/conversations/{id}/details', [ChatController::class, 'conversationDetails']);
-
-    // Création d'une conversation (POST /api/conversations)
+    Route::get('/conversations/{id}/details', [ChatController::class, 'conversationDetails']);
+    Route::post('/conversations/{id}/join', [ChatController::class, 'join']);
     Route::post('/conversations', [ChatController::class, 'createConversation']);
-
-    // Récupérer messages d'une conversation (GET /api/conversations/{conversation}/messages)
-    // (point vers getMessages pour compatibilité)
     Route::get('/conversations/{conversation}/messages', [ChatController::class, 'getMessages']);
-
-    // Ancienne/alternative route (compatibilité) : /api/chat/{conversation}/messages
     Route::get('/chat/{conversation}/messages', [ChatController::class, 'getMessages']);
-
-    // Envoi d'un message — endpoint central (POST /api/chat/send)
     Route::post('/chat/send', [ChatController::class, 'send']);
+    Route::post('/conversations/direct', [ChatController::class, 'storeDirect']);
 
-    // endpoints pour les suggestions/faq/traduction via Gemini
+    // Gemini endpoints
     Route::post('gemini/suggest', [GeminiController::class, 'suggest']);
     Route::post('gemini/translate', [GeminiController::class, 'translate']);
     Route::post('gemini/faq', [GeminiController::class, 'faqFromTicket']);
@@ -176,6 +169,8 @@ Route::get('/conversations/{id}/details', [ChatController::class, 'conversationD
     Route::delete('attachments/{attachment}', [AttachmentController::class, 'destroy']);
     Route::get('attachments/{attachment}/show', [AttachmentController::class, 'show']);
 
+
+    
     // Groups
     Route::apiResource('groups', GroupController::class);
     Route::post('groups/{group}/add-member', [GroupController::class, 'addMember']);
@@ -184,6 +179,12 @@ Route::get('/conversations/{id}/details', [ChatController::class, 'conversationD
     // Dashboard & helpers
     Route::get('/dashboard', [DashboardController::class, 'index']);
     Route::post('/tickets/{ticket}/assign', [TicketController::class, 'assignAgent']);
+
+    // ------------------ REPORTS ------------------
+    Route::prefix('reports')->group(function () {
+        Route::get('/', [ReportsController::class, 'index'])->name('reports.index');
+        Route::get('/export', [ReportsController::class, 'export'])->name('reports.export');
+    });
 });
 
 /*

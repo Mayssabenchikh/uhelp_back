@@ -90,7 +90,7 @@ class UserController extends Controller
             'name'          => 'required|string|max:255',
             'email'         => 'required|email|unique:users,email',
             'password'      => 'required|string|min:6',
-            'role'          => ['required', Rule::in(['admin', 'agent', 'client'])],
+            'role' => ['required', Rule::in(['super_admin', 'admin', 'agent', 'client'])],
             'profile_photo' => 'nullable|image|max:2048',
             'phone_number'  => 'nullable|string|max:20',
             'location'      => 'nullable|string|max:255', // ajouté
@@ -126,7 +126,7 @@ public function update(Request $request, $id)
             Rule::unique('users')->ignore($user->id),
         ],
         'password'      => 'nullable|string|min:6',
-        'role'          => 'sometimes|required|in:agent,client',
+        'role' => 'sometimes|required|in:super_admin,admin,agent,client',
         'phone_number'  => 'nullable|string|max:20',
         'location'      => 'nullable|string|max:255',
         'department_id' => 'nullable|exists:departments,id',
