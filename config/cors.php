@@ -1,12 +1,14 @@
 <?php
+
 return [
 
-    // Applique CORS aux chemins listés ici
-'paths' => ['api/*', 'sanctum/csrf-cookie', 'login', 'logout', 'api/*'],
+    // Appliquer CORS uniquement sur les routes API
+    'paths' => ['api/*'],
 
-    'allowed_methods' => ['*'], // autoriser GET, POST, PUT, DELETE, OPTIONS...
-    
-    // autorise explicitement ton front (en dev)
+    // Autoriser toutes les méthodes HTTP
+    'allowed_methods' => ['*'],
+
+    // Autoriser uniquement ton front en dev
     'allowed_origins' => [
         'http://localhost:3000',
         'http://127.0.0.1:3000',
@@ -14,12 +16,14 @@ return [
 
     'allowed_origins_patterns' => [],
 
-    'allowed_headers' => ['*'], // autoriser tous les headers envoyés (incl. Authorization)
+    // Autoriser tous les headers, y compris Authorization
+    'allowed_headers' => ['*'],
 
+    // Pas besoin d'exposer d'en-têtes spécifiques
     'exposed_headers' => [],
 
     'max_age' => 0,
 
-    // si tu utilises cookies/Sanctum (avec credentials) -> mettre true
+    // Pas de cookies → false
     'supports_credentials' => false,
 ];

@@ -70,4 +70,23 @@ class SubscriptionController extends Controller
         $subscription->markCancelled();
         return response()->json(null,204);
     }
+    public function cancel()
+{
+    $user = Auth::user();
+
+    $subscription = Subscription::where('user_id', $user->id)
+        ->where('status', 'active')
+        ->first();
+
+    if (!$subscription) {
+        return response()->json(['message' => 'No active subscription found'], 404);
+    }
+
+    $subscription->status = 'cancelled';
+    $subscription->current_period_ends_at = now();
+    $subscription->save();
+
+    return response()->json(['message' => 'Subscription cancelled successfully']);
+}
+
 }

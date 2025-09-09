@@ -3,7 +3,6 @@
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
-use Illuminate\Http\Middleware\HandleCors;
 
 return Application::configure(basePath: dirname(__DIR__))
     ->withRouting(
@@ -14,16 +13,18 @@ return Application::configure(basePath: dirname(__DIR__))
         health: '/up',
     )
     ->withMiddleware(function (Middleware $middleware): void {
+        // Middleware global
         $middleware->append([
-            \App\Http\Middleware\Cors::class, // ton middleware CORS
+            \Illuminate\Http\Middleware\HandleCors::class,
         ]);
 
+        // Groupe API
         $middleware->group('api', [
-            // Retiré EnsureFrontendRequestsAreStateful pour token-based API
             'throttle:api',
             \Illuminate\Routing\Middleware\SubstituteBindings::class,
         ]);
 
+        // Alias
         $middleware->alias([
             'admin' => \App\Http\Middleware\AdminMiddleware::class,
             'role' => \App\Http\Middleware\EnsureRole::class,

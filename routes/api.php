@@ -162,7 +162,14 @@ Route::middleware('auth:sanctum')->group(function () {
     // Subscriptions & payments
     Route::apiResource('subscription-plans', SubscriptionPlanController::class);
     Route::apiResource('subscriptions', SubscriptionController::class);
+    // compatibility routes for front
+Route::post('subscriptions/{plan}/subscribe', [SubscriptionController::class, 'subscribe']);
+Route::post('user/subscription/cancel', [SubscriptionController::class, 'cancelCurrent']);
+
     Route::apiResource('payments', PaymentController::class);
+    Route::get('payments/{payment}/invoice/download', [PaymentController::class, 'downloadInvoice']);
+Route::put('/payments/{payment}', [PaymentController::class, 'update']);
+Route::post('gemini/faq', [GeminiController::class, 'generateFaq']);
 
     // Attachments
     Route::post('attachments', [AttachmentController::class, 'store']);
@@ -170,7 +177,8 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('attachments/{attachment}/show', [AttachmentController::class, 'show']);
 
 
-    
+    Route::post('/user/subscription/cancel', [SubscriptionController::class, 'cancel']);
+
     // Groups
     Route::apiResource('groups', GroupController::class);
     Route::post('groups/{group}/add-member', [GroupController::class, 'addMember']);
@@ -179,6 +187,7 @@ Route::middleware('auth:sanctum')->group(function () {
     // Dashboard & helpers
     Route::get('/dashboard', [DashboardController::class, 'index']);
     Route::post('/tickets/{ticket}/assign', [TicketController::class, 'assignAgent']);
+Route::get('payments/{payment}/invoice/download', [PaymentController::class, 'downloadInvoice']);
 
     // ------------------ REPORTS ------------------
     Route::prefix('reports')->group(function () {
@@ -186,6 +195,7 @@ Route::middleware('auth:sanctum')->group(function () {
         Route::get('/export', [ReportsController::class, 'export'])->name('reports.export');
     });
 });
+
 
 /*
 |--------------------------------------------------------------------------

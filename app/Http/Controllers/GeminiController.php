@@ -27,38 +27,18 @@ class GeminiController extends Controller
         try {
             if (empty(config('services.gemini.key', env('GEMINI_API_KEY', '')))) {
                 Log::error('Gemini suggest called but GEMINI_API_KEY not configured');
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Gemini API key not configured on server.'
-                ], 500);
+                return response()->json(['success' => false, 'message' => 'Gemini API key not configured on server.'], 500);
             }
 
             $suggestion = $this->gemini->suggestReply($validated['context']);
 
-            return response()->json([
-                'success' => true,
-                'suggestion' => $suggestion,
-            ]);
+            return response()->json(['success' => true, 'suggestion' => $suggestion]);
         } catch (Throwable $e) {
-            Log::error('Gemini suggest error', [
-                'message' => $e->getMessage(),
-                'trace' => $e->getTraceAsString(),
-            ]);
-
-            return response()->json([
-                'success' => false,
-                'message' => 'Unable to generate suggestion.',
-                'error' => $e->getMessage(),
-            ], 500);
+            Log::error('Gemini suggest error', ['message' => $e->getMessage(), 'trace' => $e->getTraceAsString()]);
+            return response()->json(['success' => false, 'message' => 'Unable to generate suggestion.', 'error' => $e->getMessage()], 500);
         }
     }
 
-    // Les autres méthodes (translate, faqFromTicket) peuvent rester identiques
-
-
-    /**
-     * Traduit un texte vers la langue souhaitée.
-     */
     public function translate(Request $request): JsonResponse
     {
         $validated = $request->validate([
@@ -69,51 +49,42 @@ class GeminiController extends Controller
         try {
             $translation = $this->gemini->translate($validated['text'], $validated['to']);
 
-            return response()->json([
-                'success' => true,
-                'translation' => $translation,
-            ]);
+            return response()->json(['success' => true, 'translation' => $translation]);
         } catch (Throwable $e) {
-            Log::error('Gemini translate error', [
-                'message' => $e->getMessage(),
-                'trace' => $e->getTraceAsString(),
-            ]);
-
-            return response()->json([
-                'success' => false,
-                'message' => 'Unable to translate text.',
-                'error' => $e->getMessage(),
-            ], 500);
+            Log::error('Gemini translate error', ['message' => $e->getMessage(), 'trace' => $e->getTraceAsString()]);
+            return response()->json(['success' => false, 'message' => 'Unable to translate text.', 'error' => $e->getMessage()], 500);
         }
     }
 
     /**
      * Génère des FAQ / résumé / tags depuis un ticket.
      */
-    public function faqFromTicket(Request $request): JsonResponse
+    public function generateFaq(Request $request): JsonResponse
     {
-        $validated = $request->validate([
-            'ticket' => 'required|string',
-        ]);
-
         try {
-            $faq = $this->gemini->faqFromTicket($validated['ticket']);
+            $ticketContent = $request->input('content');
 
+            if (!$ticketContent) {
+                return response()->json(['success' => false, 'message' => 'Content is required'], 422);
+            }
+
+            $raw = $this->gemini->faqFromTicket($ticketContent);
+
+            // Try to decode JSON (we asked the model to return JSON)
+            $maybe = json_decode($raw, true);
+            if (json_last_error() === JSON_ERROR_NONE && is_array($maybe)) {
+                return response()->json(['success' => true, 'faq' => $maybe]);
+            }
+
+            // If not valid JSON, return raw text under faq_text for debugging
             return response()->json([
                 'success' => true,
-                'faq' => $faq,
+                'faq_text' => $raw,
+                'message' => 'Model did not return structured JSON — see faq_text.'
             ]);
         } catch (Throwable $e) {
-            Log::error('Gemini faqFromTicket error', [
-                'message' => $e->getMessage(),
-                'trace' => $e->getTraceAsString(),
-            ]);
-
-            return response()->json([
-                'success' => false,
-                'message' => 'Unable to generate FAQ from ticket.',
-                'error' => $e->getMessage(),
-            ], 500);
+            Log::error('Gemini Error', ['error' => $e->getMessage(), 'trace' => $e->getTraceAsString()]);
+            return response()->json(['success' => false, 'message' => 'Unable to generate FAQ', 'error' => $e->getMessage()], 500);
         }
     }
 }
