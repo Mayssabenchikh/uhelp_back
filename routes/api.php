@@ -208,3 +208,4 @@ Route::middleware(['auth:sanctum', 'role:admin'])->group(function () {
     Route::apiResource('admin/invoices', InvoiceController::class);
     Route::get('admin/invoices/{invoice}/pdf', [InvoiceController::class, 'downloadPdf']);
 });
+Route::middleware('auth:sanctum')->put('/user/{id}', [UserController::class, 'update']);

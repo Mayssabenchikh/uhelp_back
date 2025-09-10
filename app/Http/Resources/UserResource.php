@@ -20,8 +20,9 @@ class UserResource extends JsonResource
             'phone_number'      => $this->phone_number,
             'profile_photo'     => $this->profile_photo,
             'profile_photo_url' => $this->profile_photo
-                ? asset('storage/' . $this->profile_photo)
-                : null,
+    ? asset('storage/' . $this->profile_photo) . '?t=' . time()
+    : null,
+
             'department' => $this->whenLoaded('department', function () {
                 return [
                     'id'   => $this->department->id,

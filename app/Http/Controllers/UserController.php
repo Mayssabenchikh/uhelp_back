@@ -9,14 +9,13 @@ use Illuminate\Validation\Rule;
 use Illuminate\Support\Facades\Storage;
 use App\Http\Resources\UserResource;
 use Illuminate\Support\Facades\Response;
-
+use Illuminate\Support\Facades\Log;
 class UserController extends Controller
 {
     // Lister tous les utilisateurs
     public function index(Request $request)
     {
         $perPage = (int) $request->get('per_page', 15);
-
         $query = User::with('department');
 
         if ($request->filled('search')) {
@@ -70,7 +69,11 @@ class UserController extends Controller
     public function show($id)
     {
         $user = User::findOrFail($id);
-        return response()->json($user);
+        $profilePhotoUrl = $user->profile_photo
+            ? asset('storage/' . $user->profile_photo)
+            : null;
+
+        return response()->json(array_merge($user->toArray(), ['profile_photo_url' => $profilePhotoUrl]));
     }
 
     // Créer un nouvel utilisateur
@@ -96,39 +99,75 @@ class UserController extends Controller
         $user = User::create($validated);
         $user->sendEmailVerificationNotification();
 
-        return response()->json(['message' => 'User created successfully', 'user' => $user], 201);
+        return response()->json([
+            'message' => 'User created successfully',
+            'user' => array_merge($user->toArray(), [
+                'profile_photo_url' => $user->profile_photo ? asset('storage/' . $user->profile_photo) : null
+            ])
+        ], 201);
     }
 
     // Mettre à jour un utilisateur
-    public function update(Request $request, User $user)
-    {
-        $request->validate([
-            'name' => 'sometimes|string|max:255',
+   public function update(Request $request, User $user)
+{
+    Log::debug('update:user', ['id' => $user->id, 'method' => $request->method()]);
+    Log::debug('incoming_all', $request->all());
+    Log::debug('has_file', ['profile_photo' => $request->hasFile('profile_photo')]);
 
-    'profile_photo' => 'nullable|image|mimes:jpeg,jpg,png,webp|max:2048',
+    $validated = $request->validate([
+        'name'           => 'sometimes|string|max:255',
+        'email'          => ['sometimes','email', Rule::unique('users','email')->ignore($user->id)],
+        'phone_number'   => 'sometimes|nullable|string|max:20',
+        'password'       => 'sometimes|nullable|string|min:6',
+        // accept common types; keep it as image to ensure mime/type/size checks
+        'profile_photo'  => 'sometimes|file|image|mimes:jpeg,jpg,png,webp|max:20480',
+    ]);
 
-        ]);
+    // Assign scalars only if the key exists (PUT + form-data can send empty strings intentionally)
+    if ($request->has('name'))          $user->name = $request->input('name');
+    if ($request->has('email'))         $user->email = $request->input('email');
+    if ($request->has('phone_number'))  $user->phone_number = $request->input('phone_number');
+    if ($request->filled('password'))   $user->password = Hash::make($request->input('password'));
 
-        if ($request->hasFile('profile_photo')) {
+    // Handle photo upload (delete old, save new)
+    if ($request->hasFile('profile_photo')) {
+        try {
             $file = $request->file('profile_photo');
-            $filename = time() . '_' . $file->getClientOriginalName();
+
+            // remove old if present
+            if ($user->profile_photo && Storage::disk('public')->exists($user->profile_photo)) {
+                Storage::disk('public')->delete($user->profile_photo);
+            }
+
+            $original  = $file->getClientOriginalName();
+            $sanitized = preg_replace('/[^A-Za-z0-9\-_\.]/', '_', $original);
+            $filename  = time() . '_' . $sanitized;
+
             $path = $file->storeAs('profile_photos', $filename, 'public');
+            $user->profile_photo = $path;
 
-            $user->profile_photo = 'profile_photos/' . $filename;
+            Log::debug('photo_stored', ['path' => $path]);
+        } catch (\Exception $e) {
+            Log::error('photo_upload_failed', ['error' => $e->getMessage()]);
+            return response()->json([
+                'message' => 'Error uploading profile photo',
+                'error'   => $e->getMessage()
+            ], 500);
         }
-
-        if ($request->has('name')) {
-            $user->name = $request->name;
-        }
-
-        $user->save();
-
-        // Retourne l'utilisateur avec l'accesseur déjà inclus
-        return response()->json([
-            'message' => 'Profile updated successfully',
-            'user' => $user,
-        ]);
     }
+
+    $user->save();
+
+    $profilePhotoUrl = $user->profile_photo
+        ? asset('storage/'.$user->profile_photo) . '?t=' . time() // cache-bust
+        : null;
+
+    return response()->json([
+        'message' => 'Profile updated successfully',
+        'user' => array_merge($user->toArray(), ['profile_photo_url' => $profilePhotoUrl]),
+    ]);
+}
+
 
     // Supprimer un utilisateur
     public function destroy($id)
@@ -178,8 +217,13 @@ class UserController extends Controller
     // Utilisateur connecté
     public function me(Request $request)
     {
+        $user = $request->user();
+        $profilePhotoUrl = $user->profile_photo
+            ? asset('storage/' . $user->profile_photo)
+            : null;
+
         return response()->json([
-            'user' => $request->user()
+            'user' => array_merge($user->toArray(), ['profile_photo_url' => $profilePhotoUrl])
         ]);
     }
 }

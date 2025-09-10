@@ -35,6 +35,8 @@ class User extends Authenticatable implements MustVerifyEmail
         'email_verified_at' => 'datetime',
     ];
 
+
+
     // Pour inclure automatiquement l'URL dans la sérialisation JSON
     protected $appends = ['profile_photo_url'];
 
