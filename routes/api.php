@@ -28,6 +28,7 @@ use App\Http\Controllers\TrashedTicketController;
 use App\Http\Controllers\QuickResponseController;
 use App\Http\Controllers\GeminiController;
 use App\Http\Controllers\ReportsController;
+use App\Http\Controllers\NotificationController;
 
 /*
 |--------------------------------------------------------------------------
@@ -115,7 +116,13 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('gemini/suggest', [GeminiController::class, 'suggest']);
     Route::post('gemini/translate', [GeminiController::class, 'translate']);
     Route::post('gemini/faq', [GeminiController::class, 'faqFromTicket']);
-
+//--------------------------------------
+    Route::get('/tickets/available', [TicketController::class, 'available']);
+    Route::get('/tickets/agent/assigned', [TicketController::class, 'assigned']);
+    Route::get('/tickets/{ticket}/responses', [TicketController::class, 'getResponses']);
+    Route::post('/tickets/{ticket}/responses', [TicketController::class, 'addResponse']);
+    Route::get('/users/ticket-counts', [TicketController::class, 'ticketCounts']);
+//------------------------------------------
     // Users & exports
     Route::get('users/ticket-counts', [TicketController::class, 'ticketCounts']);
     Route::get('/users/export', [UserController::class, 'export']);
@@ -194,6 +201,8 @@ Route::get('payments/{payment}/invoice/download', [PaymentController::class, 'do
         Route::get('/', [ReportsController::class, 'index'])->name('reports.index');
         Route::get('/export', [ReportsController::class, 'export'])->name('reports.export');
     });
+Route::get('/activities', [NotificationController::class, 'index']);
+
 });
 
 

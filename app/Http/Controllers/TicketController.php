@@ -382,6 +382,35 @@ class TicketController extends Controller
 
         return response()->json(['data' => $result]);
     }
+public function available(Request $request)
+    {
+        $tickets = Ticket::with(['client','agent'])
+                   ->whereNull('agentassigne_id')
+                   ->where(function($q){
+                      $q->where('statut', 'open')->orWhere('statut', 'pending');
+                   })
+                   ->orderBy('created_at','desc')
+                   ->get();
 
+        return response()->json(['success' => true, 'data' => $tickets]);
+    }
+
+    // Retourne les tickets assignés à l'agent authentifié ou selon param passé
+    public function assigned(Request $request)
+    {
+        $user = $request->user();
+        $agentId = $request->get('agent_id', $user ? $user->id : null);
+
+        if (!$agentId) {
+            return response()->json(['success' => false, 'message' => 'Agent id missing'], 422);
+        }
+
+        $tickets = Ticket::with(['client','agent'])
+                   ->where('agentassigne_id', $agentId)
+                   ->orderBy('created_at', 'desc')
+                   ->get();
+
+        return response()->json(['success' => true, 'data' => $tickets]);
+    }
 
 }
