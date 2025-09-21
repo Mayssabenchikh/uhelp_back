@@ -29,6 +29,7 @@ use App\Http\Controllers\QuickResponseController;
 use App\Http\Controllers\GeminiController;
 use App\Http\Controllers\ReportsController;
 use App\Http\Controllers\NotificationController;
+use App\Http\Controllers\FaqController;
 
 /*
 |--------------------------------------------------------------------------
@@ -93,11 +94,19 @@ Route::post('/test-email', function (Request $request) {
 |
 */
 
+// Public FAQ listing (allow unauthenticated read)
+Route::get('faqs', [FaqController::class, 'index']);
+Route::get('faqs/{id}', [FaqController::class, 'show']);
+Route::post('faqs/match', [FaqController::class, 'match']);
+
 Route::middleware('auth:sanctum')->group(function () {
     // Auth actions
     Route::get('profile', [AuthController::class, 'profile']);
     Route::post('logout', [AuthController::class, 'logout']);
     Route::get('/me', [UserController::class, 'me']);
+
+    // FAQ management (authenticated)
+    Route::apiResource('faqs', FaqController::class)->except(['index', 'show']);
 
     // Quick responses resource
     Route::apiResource('quick-responses', QuickResponseController::class);
@@ -143,6 +152,9 @@ Route::middleware('auth:sanctum')->group(function () {
     // Tickets & responses
     Route::apiResource('tickets', TicketController::class);
     Route::apiResource('tickets.responses', TicketResponseController::class)->shallow();
+    
+    // Attachment download route
+    Route::get('/responses/{response}/download-attachment', [TicketResponseController::class, 'downloadAttachment']);
 
     // Feedbacks
     Route::post('/tickets/{ticket}/feedback', [FeedbackController::class, 'store']);
