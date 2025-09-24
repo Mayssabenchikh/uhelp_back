@@ -121,6 +121,10 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/chat/{conversation}/messages', [ChatController::class, 'getMessages']);
     Route::post('/chat/send', [ChatController::class, 'send']);
     Route::post('/conversations/direct', [ChatController::class, 'storeDirect']);
+    
+    // Chat attachments routes
+    Route::get('/chat/attachments/{attachment}/info', [ChatController::class, 'attachmentInfo']);
+    Route::get('/chat/attachments/{attachment}/download', [ChatController::class, 'downloadAttachment']);
 
     // Gemini endpoints
     Route::post('gemini/suggest', [GeminiController::class, 'suggest']);
@@ -240,3 +244,6 @@ Route::middleware(['auth:sanctum', 'role:admin'])->group(function () {
     Route::get('admin/invoices/{invoice}/pdf', [InvoiceController::class, 'downloadPdf']);
 });
 Route::middleware('auth:sanctum')->put('/user/{id}', [UserController::class, 'update']);
+
+// Chat attachment view route - outside auth middleware to handle manual authentication
+Route::get('/chat/attachments/{attachment}/view', [ChatController::class, 'viewAttachment']);

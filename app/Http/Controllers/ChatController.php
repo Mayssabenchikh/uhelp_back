@@ -115,7 +115,29 @@ public function send(Request $request)
 
             $body = (string) ($validated['body'] ?? '');
             if (trim($body) === '' && ($request->hasFile('files') || !empty($validated['attachment_ids']))) {
-                $body = '[Fichier(s) joint(s)]';
+                // Try to get the filename from the first uploaded file
+                $filename = null;
+                
+                if ($request->hasFile('files')) {
+                    $firstFile = $request->file('files')[0] ?? null;
+                    if ($firstFile && $firstFile->isValid()) {
+                        $filename = $firstFile->getClientOriginalName();
+                    }
+                } elseif (!empty($validated['attachment_ids'])) {
+                    $firstAttachment = \App\Models\Attachment::whereIn('id', $validated['attachment_ids'])
+                        ->where('user_id', $user->id)
+                        ->first();
+                    if ($firstAttachment) {
+                        $filename = $firstAttachment->filename;
+                    }
+                }
+                
+                // Use filename or fallback to generic message
+                if ($filename) {
+                    $body = $filename;
+                } else {
+                    $body = '[Fichier sans nom]';
+                }
             }
 
             $message = new ChatMessage();
@@ -389,6 +411,243 @@ public function send(Request $request)
             DB::rollBack();
             Log::error('storeDirect error: '.$e->getMessage());
             return response()->json(['message' => 'Could not create conversation', 'error' => $e->getMessage()], 500);
+        }
+    }
+
+    /**
+     * Download chat attachment securely
+     */
+    public function downloadAttachment(Request $request, $attachmentId)
+    {
+        try {
+            Log::info('Download attachment request', ['attachment_id' => $attachmentId, 'user_id' => Auth::id()]);
+
+            // Find the attachment using the Attachment model
+            $attachment = \App\Models\Attachment::where('id', $attachmentId)
+                ->where('attachable_type', 'App\\Models\\ChatMessage')
+                ->first();
+
+            if (!$attachment) {
+                Log::warning('Attachment not found', ['attachment_id' => $attachmentId]);
+                return response()->json(['message' => 'Attachment not found'], 404);
+            }
+
+            Log::info('Attachment found', ['attachment' => $attachment->toArray()]);
+
+            // Check if user has access to this attachment via conversation membership
+            $chatMessage = ChatMessage::find($attachment->attachable_id);
+            if (!$chatMessage) {
+                Log::warning('Message not found', ['attachable_id' => $attachment->attachable_id]);
+                return response()->json(['message' => 'Message not found'], 404);
+            }
+
+            Log::info('Chat message found', ['message_id' => $chatMessage->id, 'conversation_id' => $chatMessage->conversation_id]);
+
+            $conversation = Conversation::find($chatMessage->conversation_id);
+            if (!$conversation) {
+                Log::warning('Conversation not found', ['conversation_id' => $chatMessage->conversation_id]);
+                return response()->json(['message' => 'Conversation not found'], 404);
+            }
+
+            // Simplified access check - allow if user is the message sender or attachment owner
+            $userId = Auth::id();
+            $hasAccess = ($chatMessage->user_id == $userId) || ($attachment->user_id == $userId);
+            
+            // Also check conversation membership
+            if (!$hasAccess) {
+                $hasAccess = DB::table('conversation_user')
+                    ->where('conversation_id', $conversation->id)
+                    ->where('user_id', $userId)
+                    ->exists();
+            }
+
+            if (!$hasAccess) {
+                Log::warning('Access denied', [
+                    'user_id' => $userId,
+                    'message_user_id' => $chatMessage->user_id,
+                    'attachment_user_id' => $attachment->user_id
+                ]);
+                return response()->json(['message' => 'Access denied'], 403);
+            }
+
+            // Check if file exists on the specified disk
+            if (!Storage::disk($attachment->disk)->exists($attachment->path)) {
+                Log::error('File not found on storage', [
+                    'disk' => $attachment->disk,
+                    'path' => $attachment->path,
+                    'full_path' => Storage::disk($attachment->disk)->path($attachment->path)
+                ]);
+                return response()->json(['message' => 'File not found on storage'], 404);
+            }
+
+            Log::info('Serving file download', ['filename' => $attachment->filename]);
+
+            // Return file as download
+            return response()->download(
+                Storage::disk($attachment->disk)->path($attachment->path),
+                $attachment->filename,
+                [
+                    'Content-Type' => $attachment->mime,
+                    'Content-Disposition' => 'attachment; filename="' . $attachment->filename . '"'
+                ]
+            );
+
+        } catch (\Exception $e) {
+            Log::error('Download attachment error: ' . $e->getMessage(), [
+                'attachment_id' => $attachmentId,
+                'user_id' => Auth::id(),
+                'trace' => $e->getTraceAsString()
+            ]);
+            return response()->json(['message' => 'Download failed', 'error' => $e->getMessage()], 500);
+        }
+    }
+
+    /**
+     * View chat attachment securely (for images, PDFs, etc.)
+     */
+    public function viewAttachment(Request $request, $attachmentId)
+    {
+        try {
+            Log::info('View attachment request', ['attachment_id' => $attachmentId]);
+
+            // Check token in query params or headers
+            $token = $request->get('token') ?? $request->bearerToken();
+            if (!$token) {
+                Log::warning('No authentication token provided');
+                return response()->json(['message' => 'Authentication required'], 401);
+            }
+
+            // Authenticate user with token
+            $user = null;
+            if ($request->bearerToken()) {
+                // Token in Authorization header
+                $user = Auth::guard('sanctum')->user();
+                Log::info('Using bearer token authentication', ['user_id' => $user?->id]);
+            } else {
+                // Token in query param - need to manually verify
+                Log::info('Using query token authentication', ['token_prefix' => substr($token, 0, 10) . '...']);
+                $personalAccessToken = \Laravel\Sanctum\PersonalAccessToken::findToken($token);
+                if ($personalAccessToken && !$personalAccessToken->cant('*')) {
+                    $user = $personalAccessToken->tokenable;
+                    Auth::setUser($user);
+                    Log::info('Query token authentication successful', ['user_id' => $user->id]);
+                } else {
+                    Log::warning('Query token authentication failed', [
+                        'token_found' => $personalAccessToken ? 'yes' : 'no',
+                        'token_expired' => $personalAccessToken ? $personalAccessToken->cant('*') : 'n/a'
+                    ]);
+                }
+            }
+
+            if (!$user) {
+                Log::warning('Invalid authentication token');
+                return response()->json(['message' => 'Invalid authentication token'], 401);
+            }
+
+            Log::info('User authenticated', ['user_id' => $user->id]);
+
+            // Find the attachment using the Attachment model
+            $attachment = \App\Models\Attachment::where('id', $attachmentId)
+                ->where('attachable_type', 'App\\Models\\ChatMessage')
+                ->first();
+
+            if (!$attachment) {
+                Log::warning('Attachment not found', ['attachment_id' => $attachmentId]);
+                return response()->json(['message' => 'Attachment not found'], 404);
+            }
+
+            Log::info('Attachment found', ['attachment' => $attachment->toArray()]);
+
+            // Check if user has access to this attachment via conversation membership
+            $chatMessage = ChatMessage::find($attachment->attachable_id);
+            if (!$chatMessage) {
+                Log::warning('Message not found', ['attachable_id' => $attachment->attachable_id]);
+                return response()->json(['message' => 'Message not found'], 404);
+            }
+
+            $conversation = Conversation::find($chatMessage->conversation_id);
+            if (!$conversation) {
+                Log::warning('Conversation not found', ['conversation_id' => $chatMessage->conversation_id]);
+                return response()->json(['message' => 'Conversation not found'], 404);
+            }
+
+            // Simplified access check - allow if user is the message sender or attachment owner
+            $userId = $user->id;
+            $hasAccess = ($chatMessage->user_id == $userId) || ($attachment->user_id == $userId);
+            
+            // Also check conversation membership
+            if (!$hasAccess) {
+                $hasAccess = DB::table('conversation_user')
+                    ->where('conversation_id', $conversation->id)
+                    ->where('user_id', $userId)
+                    ->exists();
+            }
+
+            if (!$hasAccess) {
+                Log::warning('Access denied', [
+                    'user_id' => $userId,
+                    'message_user_id' => $chatMessage->user_id,
+                    'attachment_user_id' => $attachment->user_id
+                ]);
+                return response()->json(['message' => 'Access denied'], 403);
+            }
+
+            // Check if file exists on the specified disk
+            if (!Storage::disk($attachment->disk)->exists($attachment->path)) {
+                Log::error('File not found on storage', [
+                    'disk' => $attachment->disk,
+                    'path' => $attachment->path,
+                    'full_path' => Storage::disk($attachment->disk)->path($attachment->path)
+                ]);
+                return response()->json(['message' => 'File not found on storage'], 404);
+            }
+
+            Log::info('Serving file for viewing', ['filename' => $attachment->filename]);
+
+            // Return file content for viewing
+            return response()->file(
+                Storage::disk($attachment->disk)->path($attachment->path),
+                [
+                    'Content-Type' => $attachment->mime,
+                    'Content-Disposition' => 'inline; filename="' . $attachment->filename . '"',
+                    'Cache-Control' => 'private, max-age=3600'
+                ]
+            );
+
+        } catch (\Exception $e) {
+            Log::error('View attachment error: ' . $e->getMessage(), [
+                'attachment_id' => $attachmentId,
+                'user_id' => Auth::id(),
+                'trace' => $e->getTraceAsString()
+            ]);
+            return response()->json(['message' => 'View failed', 'error' => $e->getMessage()], 500);
+        }
+    }
+
+    /**
+     * Get attachment info for debugging
+     */
+    public function attachmentInfo(Request $request, $attachmentId)
+    {
+        try {
+            $attachment = \App\Models\Attachment::where('id', $attachmentId)
+                ->where('attachable_type', 'App\\Models\\ChatMessage')
+                ->first();
+
+            if (!$attachment) {
+                return response()->json(['message' => 'Attachment not found'], 404);
+            }
+
+            return response()->json([
+                'attachment' => $attachment,
+                'file_exists' => Storage::disk($attachment->disk)->exists($attachment->path),
+                'disk' => $attachment->disk,
+                'path' => $attachment->path,
+                'full_path' => Storage::disk($attachment->disk)->path($attachment->path),
+                'url' => $attachment->url(),
+            ]);
+        } catch (\Exception $e) {
+            return response()->json(['error' => $e->getMessage()], 500);
         }
     }
 
