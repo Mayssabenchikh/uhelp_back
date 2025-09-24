@@ -159,8 +159,17 @@ class GeminiService
 
     public function faqFromTicket(string $ticketText): string
     {
-        // Ask for JSON structured output to facilitate frontend parsing
-        $prompt = "Extract 3 short FAQ Q&A pairs from the following ticket. Return valid JSON array of objects with keys exactly: question and answer.\n\nTicket:\n{$ticketText}\n\nExample output:\n[{\"question\":\"...\",\"answer\":\"...\"}, ...]";
+        // Instruct model to return EXACTLY one JSON object containing ONLY the key "answer".
+        // The value should be a concise helpful answer (1-3 sentences). Do NOT include any other
+        // keys, commentary, explanation, or markdown — ONLY valid JSON like: {"answer":"..."}
+        $prompt = "You are a helpful assistant. Given the following user input, produce a single concise FAQ-style answer that directly resolves the user's issue.\n\n"
+            . "REQUIREMENTS:\n"
+            . "- RETURN EXACTLY ONE JSON OBJECT with a single key named \"answer\".\n"
+            . "- The \"answer\" value must be a short, clear paragraph (one to three sentences).\n"
+            . "- Do NOT include any other keys, comments, explanations, or markdown. Output must be ONLY valid JSON.\n\n"
+            . "Input:\n{$ticketText}\n\n"
+            . "Example output:\n{\"answer\":\"To reset your password, click the 'Forgot password' link on the login page and follow the instructions sent to your email. If you don't receive the email check your spam folder or contact support.\"}";
+
         return $this->callGenerate($prompt);
     }
 }

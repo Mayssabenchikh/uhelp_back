@@ -4,8 +4,10 @@ namespace App\Http\Controllers;
 
 use App\Models\Faq;
 use App\Services\GeminiService;
+use App\Models\PendingFaq;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Support\Facades\Auth;
 
 class FaqController extends Controller
 {
@@ -141,16 +143,46 @@ class FaqController extends Controller
 
         // No confident DB match — ask Gemini to generate possible FAQ pairs and return first result
         try {
-            // We ask Gemini to return JSON array of {question,answer}
+            // We ask Gemini to return JSON array of {question,answer} (but model may return {answer} only)
             $raw = $this->gemini->faqFromTicket($q);
             $maybe = json_decode($raw, true);
             if (json_last_error() === JSON_ERROR_NONE && is_array($maybe) && count($maybe) > 0) {
-                $first = $maybe[0];
-                // Normalize keys
-                $generated = [
-                    'question' => $first['question'] ?? null,
-                    'answer' => $first['answer'] ?? null,
-                ];
+                // If model returned an indexed array of objects (e.g. [{question,answer}, ...])
+                if (isset($maybe[0]) && is_array($maybe[0])) {
+                    $first = $maybe[0];
+                    $generated = [
+                        'question' => $first['question'] ?? null,
+                        'answer' => $first['answer'] ?? null,
+                    ];
+                } elseif (isset($maybe['answer'])) {
+                    // Model returned a single object with only 'answer'
+                    $generated = [
+                        'question' => null,
+                        'answer' => $maybe['answer'] ?? null,
+                    ];
+                } else {
+                    // Unexpected shape: try to stringify best-effort
+                    $generated = [
+                        'question' => null,
+                        'answer' => is_string($maybe) ? $maybe : json_encode($maybe),
+                    ];
+                }
+
+                // Persist generated answer into pending_faqs so admins can review it
+                try {
+                    PendingFaq::create([
+                        'question' => $generated['question'] ?? $q,
+                        'answer' => $generated['answer'] ?? '',
+                        'language' => $validated['language'] ?? 'en',
+                        'category' => null,
+                        'user_id' => Auth::id() ?? null,
+                        'status' => 'pending',
+                        'raw_model_output' => is_string($raw) ? $raw : json_encode($raw),
+                    ]);
+                } catch (\Throwable $e) {
+                    \Illuminate\Support\Facades\Log::error('Failed to save pending FAQ from AI: ' . $e->getMessage());
+                }
+
                 return response()->json(['success' => true, 'data' => ['faq' => $generated, 'score' => $bestScore, 'source' => 'ai']]);
             }
 

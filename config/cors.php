@@ -2,8 +2,8 @@
 
 return [
 
-    // Appliquer CORS uniquement sur les routes API
-    'paths' => ['api/*'],
+    // Appliquer CORS sur les routes API et broadcasting
+    'paths' => ['api/*', 'broadcasting/auth'],
 
     // Autoriser toutes les méthodes HTTP
     'allowed_methods' => ['*'],
@@ -24,6 +24,6 @@ return [
 
     'max_age' => 0,
 
-    // Pas de cookies → false
-    'supports_credentials' => false,
+    // Activer les credentials pour l'authentification WebSocket
+    'supports_credentials' => true,
 ];

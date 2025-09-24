@@ -23,6 +23,7 @@ use App\Http\Controllers\ChatController;
 use App\Http\Controllers\AttachmentController;
 use App\Http\Controllers\GroupController;
 use App\Http\Controllers\Admin\InvoiceController;
+use App\Http\Controllers\Admin\FaqPendingController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\TrashedTicketController;
 use App\Http\Controllers\QuickResponseController;
@@ -125,6 +126,15 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('gemini/suggest', [GeminiController::class, 'suggest']);
     Route::post('gemini/translate', [GeminiController::class, 'translate']);
     Route::post('gemini/faq', [GeminiController::class, 'faqFromTicket']);
+
+    // Pending FAQs (admin review)
+    Route::prefix('admin')->middleware('role:admin')->group(function () {
+        Route::get('pending-faqs', [FaqPendingController::class, 'index']);
+        Route::get('pending-faqs/{id}', [FaqPendingController::class, 'show']);
+        Route::post('pending-faqs/{id}/approve', [FaqPendingController::class, 'approve']);
+        Route::post('pending-faqs/{id}/reject', [FaqPendingController::class, 'reject']);
+        Route::delete('pending-faqs/{id}', [FaqPendingController::class, 'destroy']);
+    });
 //--------------------------------------
     Route::get('/tickets/available', [TicketController::class, 'available']);
     Route::get('/tickets/agent/assigned', [TicketController::class, 'assigned']);
